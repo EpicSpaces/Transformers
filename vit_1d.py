@@ -56,7 +56,7 @@ class TransformerEncoder(nn.Module):
         )
 
     def forward(self, x):
-        x = x + self.attn(self.ln1(x))
+        x = x + self.attn(self.ln1(x), True)
         x = x + self.mlp(self.ln2(x))
         return x
 

@@ -23,12 +23,12 @@ class SelfAttention(nn.Module):
             theta_rescale_factor=1.0    # NTK scaling
         )
 
-    def forward(self, x):
+    def forward(self, x, use_cls=False):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.n_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
 
-        q, k = self.rope(q, k)
+        q, k = self.rope(q, k, use_cls)
 
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
