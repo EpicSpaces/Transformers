@@ -484,6 +484,12 @@ clustered,_ = cluster_posterior(samples,n_clusters=n_signals)
 reference_samples_per_signal = get_reference_samples(theta_all, n_batch_size=batch_size, n_signals=n_signals)
 clustered_reordered = reorder_clusters_to_reference(clustered, reference_samples_per_signal)
 
+true_values = []
+for ref in reference_samples_per_signal:  
+    med_ref = ref.mean(axis=0)            
+    true_values.append(med_ref)
+true_values = np.concatenate(true_values)  # shape [n_params]
+
 # =========================
 # 7 Corner Plot
 # =========================
@@ -501,9 +507,6 @@ clustered_np = [
     c if isinstance(c, np.ndarray) else c.detach().numpy()
     for c in clustered_reordered
 ]
-
-# "true" lines: use average of batch
-true_values = theta_batch.mean(axis=0)
 
 # base fig for cluster 0
 fig = corner.corner(
