@@ -470,13 +470,13 @@ for epoch in range(n_epochs):
 # =========================
 # 6 Posterior & Clustering
 # =========================
-x_obs = torch.stack([torch.tensor(ds[i][0]) for i in range(len(ds))]).unsqueeze(1).to(device)
+x_obs = torch.stack([ds[i][0] for i in range(len(ds))]).unsqueeze(1).to(device)
 theta_all = torch.tensor(ds.theta).reshape(len(ds),-1)
 theta_batch = theta_all[:batch_size].numpy()   # [B, params]
 
 with torch.no_grad():
     mean,var = model(x_obs)
-samples = sample_posterior(mean,var,n_samples=300).cpu().numpy()
+samples = sample_posterior(mean,var,n_samples=1000).cpu().numpy()
 
 clustered,_ = cluster_posterior(samples,n_clusters=n_signals)
 
@@ -562,7 +562,7 @@ with torch.no_grad():
     for i in range(N):
         mean_i = mean[i:i+1]
         var_i = var[i:i+1]
-        samples_i = sample_posterior(mean_i, var_i, n_samples=300)  # [n_samples, n_params]
+        samples_i = sample_posterior(mean_i, var_i, n_samples=1000)  # [n_samples, n_params]
         posterior_samples_list.append(samples_i.cpu().numpy())
 
 # Compute P-P values
