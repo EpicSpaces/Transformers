@@ -581,7 +581,7 @@ for j in range(n_params):
     cdf = np.arange(1, N+1)/N
     ks_stat = ks_1samp(sorted_p, uniform.cdf)
     ks_vals.append(ks_stat.pvalue)
-    plt.plot(sorted_p, cdf, marker='.', linestyle='-', label=f"θ{j+1} (KS={ks_stat.pvalue:.2f})")
+    plt.plot(sorted_p, cdf, marker='.', linestyle='-', label=f"{labels_names[j]} (KS={ks_stat.pvalue:.2f})")
 
 plt.xlabel("Posterior quantile")
 plt.ylabel("Fraction of events ≤ quantile")
