@@ -486,9 +486,9 @@ clustered_reordered = reorder_clusters_to_reference(clustered, reference_samples
 
 true_values = []
 for ref in reference_samples_per_signal:  
-    med_ref = ref.mean(axis=0)            
+    med_ref = np.median(ref, axis=0)            
     true_values.append(med_ref)
-true_values = np.concatenate(true_values)  # shape [n_params]
+true_values = np.concatenate(true_values) # shape [n_params]
 
 # =========================
 # 7 Corner Plot
