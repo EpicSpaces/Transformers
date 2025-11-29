@@ -530,17 +530,25 @@ for k in range(1, len(clustered_np)):
 n_params = clustered_np[0].shape[1]
 # overlay medians/stds
 axes = np.array(fig.axes).reshape((n_params, n_params))
+
 for k, cluster in enumerate(clustered_np):
-    med = np.median(cluster, axis=0)
-    std = np.std(cluster, axis=0)
-    col = colors[k]
+
+    medians = np.median(cluster, axis=0)
+    stds = np.std(cluster, axis=0)
+    color = colors[k]
 
     for i in range(n_params):
+
         ax = axes[i, i]
-        ax.axvline(true_values[i], color=col, linestyle="-", lw=2)
-        ax.axvline(med[i], color=col, linestyle=":", lw=2)
-        ax.axvline(med[i] + std[i], color=col, linestyle=":", lw=1)
-        ax.axvline(med[i] - std[i], color=col, linestyle=":", lw=1)
+        ax.axvline(true_values[i], color=color, linestyle="-", lw=2)
+        ax.axvline(medians[i], color=color, linestyle=":", lw=2)
+        ax.axvline(medians[i] + stds[i], color=color, linestyle=":", lw=1)
+        ax.axvline(medians[i] - stds[i], color=color, linestyle=":", lw=1)
+
+        for j in range(i):
+            ax2 = axes[i, j]
+            ax2.axvline(true_values[j], color=color, linestyle="-", lw=1)
+            ax2.axhline(true_values[i], color=color, linestyle="-", lw=1)
 
 plt.show()
 
