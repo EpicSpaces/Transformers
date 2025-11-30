@@ -557,12 +557,22 @@ plt.show()
 # 8 P-P plot
 # =========================
 
-# Number of parameters
-n_params = theta_all.shape[1]  # 12 = K*4
+# Keep your pp_plot function unchanged
+def pp_plot(data, ref, label="PP points"):
+    data_sorted = np.sort(data)
+    ref_sorted = np.sort(ref)
+    cdf_data = np.arange(1, len(data_sorted)+1) / len(data_sorted)
+    cdf_ref = np.searchsorted(ref_sorted, data_sorted, side='right') / len(ref_sorted)
+    # Connect dots with a line
+    plt.plot(cdf_ref, cdf_data, marker='o', linestyle='-', markersize=4, label=label)
 
-# Posterior predictive P-P plot
-N = len(ds)
-pvals = np.zeros((N, n_params))
+
+# ----------------------------
+# Multi-parameter posterior predictive P-P plot with KS
+# ----------------------------
+
+N = theta_all.shape[0]
+n_params = theta_all.shape[1]
 
 # Draw posterior samples for each observation
 posterior_samples_list = []
@@ -573,30 +583,34 @@ with torch.no_grad():
         samples_i = sample_posterior(mean_i, var_i, n_samples=1000)  # [n_samples, n_params]
         posterior_samples_list.append(samples_i.cpu().numpy())
 
-# Compute P-P values
-for i in range(N):
-    samples_i = posterior_samples_list[i]
-    true_i = theta_all[i].numpy()
-    for j in range(n_params):
-        pvals[i, j] = np.mean(samples_i[:, j] < true_i[j])
+plt.figure(figsize=(8,8))
+plt.plot([0,1], [0,1], 'k--', label="y=x (perfect match)")
 
-# Plot
-plt.figure(figsize=(6,6))
-plt.plot([0,1],[0,1],'k--')
-ks_vals=[]
+ks_vals = []
+
 for j in range(n_params):
-    sorted_p = np.sort(pvals[:, j])
-    cdf = np.arange(1, N+1)/N
-    ks_stat = ks_1samp(sorted_p, uniform.cdf)
+    # Compute posterior quantiles for this parameter
+    pvals_j = np.array([
+        np.mean(posterior_samples_list[i][:, j] < theta_all[i, j].cpu().numpy())
+        for i in range(N)
+    ])
+    
+    # KS test against uniform distribution
+    ks_stat = ks_1samp(pvals_j, uniform.cdf)
     ks_vals.append(ks_stat.pvalue)
-    plt.plot(sorted_p, cdf, marker='.', linestyle='-', label=f"{labels_names[j]} (KS={ks_stat.pvalue:.2f})")
+    
+    # Collect all posterior samples for plotting
+    ref = np.concatenate([posterior_samples_list[i][:, j] for i in range(N)])
+    data = np.array([theta_all[i, j].cpu().numpy() for i in range(N)])
+    
+    label = f"{labels_names[j]} (KS={ks_stat.pvalue:.2f})"
+    pp_plot(data, ref, label=label)
 
-plt.xlabel("Posterior quantile")
-plt.ylabel("Fraction of events ≤ quantile")
-plt.title("Posterior Predictive P-P Plot")
-plt.grid(alpha=0.3)
+plt.xlabel("Reference CDF")
+plt.ylabel("Data CDF")
+plt.title(f"Posterior Predictive P-P Plot Mean KS p-value: {np.mean(ks_vals):.2f}")
 plt.legend(fontsize=8)
+plt.grid(True)
 plt.show()
 
 print("KS p-values per parameter:", ks_vals)
-print("Mean KS p-value:", np.mean(ks_vals))
