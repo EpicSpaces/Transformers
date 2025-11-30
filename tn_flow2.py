@@ -11,10 +11,13 @@ from scipy.optimize import linear_sum_assignment
 from pycbc.waveform import get_td_waveform
 from scipy.stats import ks_1samp, uniform
 
+from typing import Tuple
+import seaborn as sns
+from scipy.stats import wasserstein_distance
+
 torch.manual_seed(42)
 np.random.seed(42)
 
-from typing import Tuple
 
 def rotate_half(x):
     """
@@ -455,7 +458,7 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 num_samples   = 12
 signal_length = 2048
 batch_size    = 128
-n_epochs      = 4000
+n_epochs      = 400
 n_signals     = 3
 n_params      = n_signals * 4
 
@@ -465,8 +468,6 @@ ds = MultiBBHToyDataset(num_samples=num_samples,
                         fs=2048,
                         f_lower=5,
                         seed=42)
-
-loader = DataLoader(ds, batch_size=batch_size, shuffle=True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -493,6 +494,9 @@ val_mae      = []
 # A simple 20% validation split from your dataset
 val_size = int(0.2 * len(ds))
 train_size = len(ds) - val_size
+print("val_size :", val_size)
+print("train_size :", train_size)
+
 train_ds, val_ds = torch.utils.data.random_split(ds, [train_size, val_size])
 train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
 val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
@@ -674,7 +678,6 @@ plt.show()
 # =========================
 # 8 P-P plot
 # =========================
-from scipy.stats import wasserstein_distance
 
 def qq_plot(samples, truth, label="QQ"):
     samples = np.asarray(samples)
@@ -735,3 +738,45 @@ plt.ylabel("True quantiles (normalized)")
 plt.legend()
 plt.grid()
 plt.show()
+
+# Violin Plot
+
+# Assume:
+# posterior_samples_list: list of N arrays [n_samples, n_params]
+# theta_all: [N, n_params]
+# labels_names: ["m1_1","m2_1","q_1","t_1",..., "t_3"]
+
+# 1. Flatten posterior samples for each parameter across all events
+n_params = theta_all.shape[1]
+posterior_flat = [
+    np.concatenate([posterior_samples_list[i][:, j] for i in range(len(posterior_samples_list))])
+    for j in range(n_params)
+]
+
+# 2. Prepare data for seaborn
+data_for_violin = []
+param_labels = []
+for j in range(n_params):
+    data_for_violin.extend(posterior_flat[j])
+    param_labels.extend([labels_names[j]] * len(posterior_flat[j]))
+
+data_for_violin = np.array(data_for_violin)
+param_labels = np.array(param_labels)
+
+# 3. Plot violin plot
+plt.figure(figsize=(16,6))
+sns.violinplot(x=param_labels, y=data_for_violin, inner="quartile", palette="Set3")
+
+# 4. Overlay true values
+true_flat = theta_all.reshape(-1, n_params).numpy() if isinstance(theta_all, torch.Tensor) else theta_all
+for j in range(n_params):
+    plt.scatter([j]*true_flat.shape[0], true_flat[:, j], color='red', s=20, label="True value" if j==0 else "")
+
+plt.xticks(rotation=45)
+plt.xlabel("Parameters")
+plt.ylabel("Posterior Samples")
+plt.title("Violin Plot of Posterior Samples with True Values for 12 BBH Parameters")
+plt.grid(alpha=0.3)
+plt.legend()
+plt.show()
+
