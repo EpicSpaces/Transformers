@@ -247,20 +247,7 @@ class MultiBBHToyDataset(Dataset):
                     h = torch.cat([torch.zeros(signal_length-len(h)), h])
                 else:
                     h = h[-signal_length:]
-                sample_signal += np.random.uniform(0.5,1.0)*h
-
-                # Posterior samples
-                sigma_m1, sigma_m2 = 0.1*m1, 0.1*m2
-                sigma_q = 0.05
-                sigma_t = 0.05*(signal_length/fs)
-                m1_s = np.random.normal(m1,sigma_m1,n_draws)
-                m2_s = np.random.normal(m2,sigma_m2,n_draws)
-                q_s = np.random.normal(q,sigma_q,n_draws)
-                t_s = np.random.normal(t0,sigma_t,n_draws)
-                m2_s = np.clip(m2_s,0,m1_s)
-                q_s = np.clip(q_s,0,1)
-                t_s = np.clip(t_s,0,signal_length/fs)
-              
+                sample_signal += np.random.uniform(0.5,1.0)*h              
 
             # Add noise and whiten
             sample_signal += 0.05*sample_signal.abs().max()*torch.randn_like(sample_signal)
@@ -269,7 +256,6 @@ class MultiBBHToyDataset(Dataset):
             self.signals[i] = sample_signal
             self.theta.append(sample_params)
             
-
         self.theta = np.array(self.theta)           # [N,K,4]
 
     def __len__(self):
@@ -440,10 +426,10 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 # 5 Training loop
 # =========================
-num_samples = 5
+num_samples = 12
 signal_length = 2048
-batch_size = 8
-n_epochs = 6
+batch_size = 128
+n_epochs = 10
 n_signals = 3
 n_params = n_signals * 4
 
@@ -556,59 +542,64 @@ plt.show()
 # =========================
 # 8 P-P plot
 # =========================
+from scipy.stats import wasserstein_distance
 
-# Keep your pp_plot function unchanged
-def pp_plot(data, ref, label="PP points"):
-    data_sorted = np.sort(data)
-    ref_sorted = np.sort(ref)
-    cdf_data = np.arange(1, len(data_sorted)+1) / len(data_sorted)
-    cdf_ref = np.searchsorted(ref_sorted, data_sorted, side='right') / len(ref_sorted)
-    # Connect dots with a line
-    plt.plot(cdf_ref, cdf_data, marker='o', linestyle='-', markersize=4, label=label)
+def qq_plot(samples, truth, label="QQ"):
+    samples = np.asarray(samples)
+    truth   = np.asarray(truth)
 
+    # Number of quantile points to compare
+    m = min(len(samples), len(truth))
 
-# ----------------------------
-# Multi-parameter posterior predictive P-P plot with KS
-# ----------------------------
+    # Quantile levels between 0 and 1
+    q = np.linspace(0, 1, m)
+
+    # Compute quantiles
+    x = np.quantile(samples, q)   # posterior quantiles
+    y = np.quantile(truth,   q)   # truth quantiles
+
+    # Normalize both to [0,1]
+    x_norm = (x - x.min()) / (x.max() - x.min() + 1e-12)
+    y_norm = (y - y.min()) / (y.max() - y.min() + 1e-12)
+
+    # Plot dots + line
+    plt.plot(x_norm, y_norm, 'o-', markersize=4, label=label)
+
 
 N = theta_all.shape[0]
 n_params = theta_all.shape[1]
 
-# Draw posterior samples for each observation
+# Draw posterior samples
 posterior_samples_list = []
 with torch.no_grad():
     for i in range(N):
         mean_i = mean[i:i+1]
-        var_i = var[i:i+1]
-        samples_i = sample_posterior(mean_i, var_i, n_samples=1000)  # [n_samples, n_params]
-        posterior_samples_list.append(samples_i.cpu().numpy())
+        var_i  = var[i:i+1]
+        samples_i = sample_posterior(mean_i, var_i, n_samples=1000)
+        posterior_samples_list.append(samples_i.cpu().numpy())   # shape [1000, n_params]
 
 plt.figure(figsize=(8,8))
-plt.plot([0,1], [0,1], 'k--', label="y=x (perfect match)")
-
-ks_vals = []
 
 for j in range(n_params):
-    # Compute posterior quantiles for this parameter
-    pvals_j = np.array([
-        np.mean(posterior_samples_list[i][:, j] < theta_all[i, j].cpu().numpy())
-        for i in range(N)
-    ])
-    # KS test against uniform distribution
-    ks_stat = ks_1samp(pvals_j, uniform.cdf)
-    ks_vals.append(ks_stat.pvalue)
-    
-    # Uniform reference CDF
-    ref_uniform = np.linspace(0, 1, N)
-    
-    label = f"{labels_names[j]} (KS={ks_stat.pvalue:.2f})"
-    pp_plot(pvals_j, ref_uniform, label=label)
 
-plt.xlabel("Reference CDF")
-plt.ylabel("Data CDF")
-plt.title(f"Posterior Predictive P-P Plot Mean KS p-value: {np.mean(ks_vals):.2f}")
-plt.legend(fontsize=8)
-plt.grid(True)
+    # flatten all posterior samples for this parameter
+    posterior_flat = np.concatenate([posterior_samples_list[i][:, j]
+                                     for i in range(N)])
+    truth = theta_all[:, j].cpu().numpy()
+
+    W = wasserstein_distance(posterior_flat, truth)
+
+    # Label with metric
+    label = f"{labels_names[j]} (W={W:.3f})"
+
+    qq_plot(posterior_flat, truth, label=label)
+
+# diagonal line (0–1 in normalized space)
+plt.plot([0,1], [0,1], 'k--', label="y=x")
+
+plt.title("QQ Plot: Posterior vs True Distribution (normalized)")
+plt.xlabel("Posterior quantiles (normalized)")
+plt.ylabel("True quantiles (normalized)")
+plt.legend()
+plt.grid()
 plt.show()
-
-print("KS p-values per parameter:", ks_vals)
