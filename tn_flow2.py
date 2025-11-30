@@ -358,17 +358,44 @@ class BayesianTransformer(nn.Module):
 
         return mean, var
 
-def sample_posterior(mean, var, n_samples=100):
+def sample_posterior(mean, var, n_samples=100, T_obs=16.0, n_signals=3):
     """
+    Sample from Gaussian posterior while enforcing physical constraints:
+      - mass ratio q ∈ [0,1]
+      - merger time t_merger ∈ [0, T_obs]
+    
     mean: [B, n_params]
     var:  [B, n_params]
-    returns: [n_samples*B, n_params]
+    n_samples: number of draws per batch element
+    T_obs: observation duration for t_merger
+    n_signals: number of BBHs in the signal
+    
+    Returns: [n_samples*B, n_params]
     """
     B, P = mean.shape
     eps = torch.randn(n_samples, B, P, device=mean.device)
+
+    # Optional: transform mean to stay positive
+    mean = mean.clone()
+    for k in range(n_signals):
+        q_idx = k*4 + 2
+        t_idx = k*4 + 3
+        mean[:, q_idx] = F.softplus(mean[:, q_idx])           # ensure q>0
+        mean[:, t_idx] = F.softplus(mean[:, t_idx])           # ensure t>0
+
+    # Sample
     samples = mean.unsqueeze(0) + eps * torch.sqrt(var).unsqueeze(0)
     samples = samples.reshape(-1, P)
+
+    # Clamp to physical ranges
+    for k in range(n_signals):
+        q_idx = k*4 + 2
+        t_idx = k*4 + 3
+        samples[:, q_idx] = torch.clamp(samples[:, q_idx], 0.0, 1.0)
+        samples[:, t_idx] = torch.clamp(samples[:, t_idx], 0.0, T_obs)
+
     return samples
+
 
 # =========================
 # 3 Spectral clustering
@@ -429,7 +456,7 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 num_samples = 12
 signal_length = 2048
 batch_size = 128
-n_epochs = 10
+n_epochs = 500
 n_signals = 3
 n_params = n_signals * 4
 
