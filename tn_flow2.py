@@ -211,7 +211,7 @@ class SelfAttention(nn.Module):
 # =========================
 class MultiBBHToyDataset(Dataset):
     def __init__(self, num_samples=100, signal_length=2048, K=3, fs=1024,
-                 f_lower=5, n_draws=300, seed=42):
+                 f_lower=5, seed=42):
         super().__init__()
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -221,7 +221,6 @@ class MultiBBHToyDataset(Dataset):
         self.K = K
         self.fs = fs
         self.f_lower = f_lower
-        self.n_draws = n_draws
 
         self.signals = torch.zeros(num_samples, signal_length, dtype=torch.float32)
         self.theta = []       # True parameters [m1,m2,q,t] per BBH
@@ -456,11 +455,11 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 num_samples = 12
 signal_length = 2048
 batch_size = 128
-n_epochs = 500
+n_epochs = 2000
 n_signals = 3
 n_params = n_signals * 4
 
-ds = MultiBBHToyDataset(num_samples=num_samples, signal_length=signal_length, K=n_signals, fs=2048, f_lower=5, n_draws=300, seed=42)
+ds = MultiBBHToyDataset(num_samples=num_samples, signal_length=signal_length, K=n_signals, fs=2048, f_lower=5, seed=42)
 loader = DataLoader(ds, batch_size=batch_size, shuffle=True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = BayesianTransformer(n_params=n_params, d_model=128, signal_length=signal_length, patch_size=16, n_channels=1, n_heads=4, n_layers=4).to(device)
@@ -487,9 +486,10 @@ x_obs = torch.stack([ds[i][0] for i in range(len(ds))]).unsqueeze(1).to(device)
 theta_all = torch.tensor(ds.theta).reshape(len(ds),-1)
 theta_batch = theta_all[:batch_size].numpy()   # [B, params]
 
+n_draws=2000
 with torch.no_grad():
     mean,var = model(x_obs)
-samples = sample_posterior(mean,var,n_samples=1000).cpu().numpy()
+samples = sample_posterior(mean,var,n_samples=n_draws).cpu().numpy()
 
 clustered,_ = cluster_posterior(samples,n_clusters=n_signals)
 
@@ -602,8 +602,8 @@ with torch.no_grad():
     for i in range(N):
         mean_i = mean[i:i+1]
         var_i  = var[i:i+1]
-        samples_i = sample_posterior(mean_i, var_i, n_samples=1000)
-        posterior_samples_list.append(samples_i.cpu().numpy())   # shape [1000, n_params]
+        samples_i = sample_posterior(mean_i, var_i, n_samples=n_draws)
+        posterior_samples_list.append(samples_i.cpu().numpy())   # shape [n_draws, n_params]
 
 plt.figure(figsize=(8,8))
 
