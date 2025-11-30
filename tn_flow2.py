@@ -130,7 +130,7 @@ class RotaryEmbeddingND(nn.Module):
         #pos_coords = self._get_full_coords()
         #pos_coords = self._get_full_coords_no_cls()
         pos_coords = self._get_full_coords() if use_cls else self._get_full_coords_no_cls()
-    
+
         freqs = self._compute_freqs(pos_coords)
 
         if N_total <= self.cache_max_len:
@@ -224,7 +224,7 @@ class MultiBBHToyDataset(Dataset):
 
         self.signals = torch.zeros(num_samples, signal_length, dtype=torch.float32)
         self.theta = []       # True parameters [m1,m2,q,t] per BBH
-        
+
         for i in range(num_samples):
             sample_signal = torch.zeros(signal_length, dtype=torch.float32)
             sample_params = []
@@ -246,7 +246,7 @@ class MultiBBHToyDataset(Dataset):
                     h = torch.cat([torch.zeros(signal_length-len(h)), h])
                 else:
                     h = h[-signal_length:]
-                sample_signal += np.random.uniform(0.5,1.0)*h              
+                sample_signal += np.random.uniform(0.5,1.0)*h
 
             # Add noise and whiten
             sample_signal += 0.05*sample_signal.abs().max()*torch.randn_like(sample_signal)
@@ -254,7 +254,7 @@ class MultiBBHToyDataset(Dataset):
 
             self.signals[i] = sample_signal
             self.theta.append(sample_params)
-            
+
         self.theta = np.array(self.theta)           # [N,K,4]
 
     def __len__(self):
@@ -362,13 +362,13 @@ def sample_posterior(mean, var, n_samples=100, T_obs=16.0, n_signals=3):
     Sample from Gaussian posterior while enforcing physical constraints:
       - mass ratio q ∈ [0,1]
       - merger time t_merger ∈ [0, T_obs]
-    
+
     mean: [B, n_params]
     var:  [B, n_params]
     n_samples: number of draws per batch element
     T_obs: observation duration for t_merger
     n_signals: number of BBHs in the signal
-    
+
     Returns: [n_samples*B, n_params]
     """
     B, P = mean.shape
@@ -452,32 +452,137 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 # 5 Training loop
 # =========================
-num_samples = 12
+num_samples   = 12
 signal_length = 2048
-batch_size = 128
-n_epochs = 2000
-n_signals = 3
-n_params = n_signals * 4
+batch_size    = 128
+n_epochs      = 4000
+n_signals     = 3
+n_params      = n_signals * 4
 
-ds = MultiBBHToyDataset(num_samples=num_samples, signal_length=signal_length, K=n_signals, fs=2048, f_lower=5, seed=42)
+ds = MultiBBHToyDataset(num_samples=num_samples,
+                        signal_length=signal_length,
+                        K=n_signals,
+                        fs=2048,
+                        f_lower=5,
+                        seed=42)
+
 loader = DataLoader(ds, batch_size=batch_size, shuffle=True)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = BayesianTransformer(n_params=n_params, d_model=128, signal_length=signal_length, patch_size=16, n_channels=1, n_heads=4, n_layers=4).to(device)
-opt = Adam(model.parameters(),lr=3e-4)
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+model = BayesianTransformer(
+    n_params=n_params,
+    d_model=128,
+    signal_length=signal_length,
+    patch_size=16,
+    n_channels=1,
+    n_heads=4,
+    n_layers=4,
+).to(device)
+
+opt = Adam(model.parameters(), lr=3e-4)
+
+# -------------------------
+# Store metrics
+# -------------------------
+train_losses = []
+val_losses   = []
+train_mae    = []
+val_mae      = []
+
+# A simple 20% validation split from your dataset
+val_size = int(0.2 * len(ds))
+train_size = len(ds) - val_size
+train_ds, val_ds = torch.utils.data.random_split(ds, [train_size, val_size])
+train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
+
+# -------------------------
+# Training Loop
+# -------------------------
 for epoch in range(n_epochs):
+
+    # ======================
+    # TRAIN
+    # ======================
     model.train()
     running_loss = 0
-    for x,theta in loader:
-        x = x.unsqueeze(1).to(device)           # [B,1,L]
-        theta = theta.reshape(theta.shape[0],-1).to(device)  # [B,K*4]
-        mean,var = model(x)
-        nll = 0.5*(((theta-mean)**2)/var + torch.log(var)).sum(dim=1).mean()
+    running_mae  = 0
+
+    for x, theta in train_loader:
+        x     = x.unsqueeze(1).to(device)                   # [B,1,L]
+        theta = theta.reshape(theta.shape[0], -1).to(device)  # [B,K*4]
+
+        mean, var = model(x)
+        nll = 0.5 * (((theta - mean)**2) / var + torch.log(var)).sum(dim=1).mean()
+
         opt.zero_grad()
         nll.backward()
         opt.step()
+
         running_loss += nll.item()
-    print(f"Epoch {epoch+1}/{n_epochs} | NLL={running_loss/len(loader):.4f}")
+        running_mae  += torch.mean(torch.abs(mean - theta)).item()
+
+    epoch_train_loss = running_loss / len(train_loader)
+    epoch_train_mae  = running_mae  / len(train_loader)
+
+    train_losses.append(epoch_train_loss)
+    train_mae.append(epoch_train_mae)
+
+    # ======================
+    # EVAL
+    # ======================
+    model.eval()
+    val_running_loss = 0
+    val_running_mae  = 0
+
+    with torch.no_grad():
+        for x, theta in val_loader:
+            x     = x.unsqueeze(1).to(device)
+            theta = theta.reshape(theta.shape[0], -1).to(device)
+
+            mean, var = model(x)
+            val_nll = 0.5 * (((theta - mean)**2) / var + torch.log(var)).sum(dim=1).mean()
+
+            val_running_loss += val_nll.item()
+            val_running_mae  += torch.mean(torch.abs(mean - theta)).item()
+
+    epoch_val_loss = val_running_loss / len(val_loader)
+    epoch_val_mae  = val_running_mae  / len(val_loader)
+
+    val_losses.append(epoch_val_loss)
+    val_mae.append(epoch_val_mae)
+
+    print(f"Epoch {epoch+1}/{n_epochs} | "
+          f"Train NLL={epoch_train_loss:.4f} | Val NLL={epoch_val_loss:.4f} | "
+          f"Train MAE={epoch_train_mae:.4f} | Val MAE={epoch_val_mae:.4f}")
+
+
+epochs_range = range(1, n_epochs + 1)
+plt.figure(figsize=(14,5))
+
+# ================= Accuracy/MAE ==================
+plt.subplot(1,2,1)
+plt.plot(epochs_range, train_mae, label="Train MAE")
+plt.plot(epochs_range, val_mae, label="Val MAE")
+plt.xlabel("Epoch")
+plt.ylabel("MAE")
+plt.title("Training vs Validation MAE")
+plt.grid(True)
+plt.legend()
+
+# ================= Loss ==================
+plt.subplot(1,2,2)
+plt.plot(epochs_range, train_losses, label="Train NLL")
+plt.plot(epochs_range, val_losses, label="Val NLL")
+plt.xlabel("Epoch")
+plt.ylabel("NLL")
+plt.title("Training vs Validation Loss")
+plt.grid(True)
+plt.legend()
+
+plt.tight_layout()
+plt.show()
 
 # =========================
 # 6 Posterior & Clustering
@@ -498,8 +603,8 @@ reference_samples_per_signal = get_reference_samples(theta_all, n_batch_size=bat
 clustered_reordered = reorder_clusters_to_reference(clustered, reference_samples_per_signal)
 
 true_values = []
-for ref in reference_samples_per_signal:  
-    med_ref = np.median(ref, axis=0)            
+for ref in reference_samples_per_signal:
+    med_ref = np.median(ref, axis=0)
     true_values.append(med_ref)
 true_values = np.concatenate(true_values) # shape [n_params]
 
@@ -565,7 +670,7 @@ for k, cluster in enumerate(clustered_np):
 
 plt.show()
 
-# 
+#
 # =========================
 # 8 P-P plot
 # =========================
