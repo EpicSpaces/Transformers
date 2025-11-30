@@ -594,17 +594,15 @@ for j in range(n_params):
         np.mean(posterior_samples_list[i][:, j] < theta_all[i, j].cpu().numpy())
         for i in range(N)
     ])
-    
     # KS test against uniform distribution
     ks_stat = ks_1samp(pvals_j, uniform.cdf)
     ks_vals.append(ks_stat.pvalue)
     
-    # Collect all posterior samples for plotting
-    ref = np.concatenate([posterior_samples_list[i][:, j] for i in range(N)])
-    data = np.array([theta_all[i, j].cpu().numpy() for i in range(N)])
+    # Uniform reference CDF
+    ref_uniform = np.linspace(0, 1, N)
     
     label = f"{labels_names[j]} (KS={ks_stat.pvalue:.2f})"
-    pp_plot(data, ref, label=label)
+    pp_plot(pvals_j, ref_uniform, label=label)
 
 plt.xlabel("Reference CDF")
 plt.ylabel("Data CDF")
