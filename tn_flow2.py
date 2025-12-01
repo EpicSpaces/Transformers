@@ -339,7 +339,23 @@ class MultiBBHToyDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, idx):
-        return self.signals[idx], torch.tensor(self.theta[idx], dtype=torch.float32)
+        x = self.signals[idx]               # [L]
+        theta = self.theta[idx].copy()      # [K,4]  (m1, m2, q, t0)
+
+        # ---- Normalize parameters ----
+        # masses: m1 in [100,310], m2 in [5,310]
+        theta[:, 0] = (theta[:, 0] - 5) / 305   # m1_norm ∈ [0,1]
+        theta[:, 1] = (theta[:, 1] - 5) / 305     # m2_norm ∈ [0,1]
+
+        # mass ratio q already in [0,1] → no change
+        theta[:, 2] = theta[:, 2]
+
+        # merger time t0 ∈ [0, T_obs = signal_length/fs]
+        tmax = self.signal_length / self.fs
+        theta[:, 3] = theta[:, 3] / tmax
+
+        return x, torch.tensor(theta, dtype=torch.float32)
+
 
     def plot_stored_sample(self):
         """
@@ -572,9 +588,9 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 # 5 Training loop
 # =========================
-num_samples   = 100
+num_samples   = 10
 signal_length = 2048
-batch_size    = 100
+batch_size    = 10
 n_epochs      = 40
 n_signals     = 3
 n_params      = n_signals * 4
@@ -701,12 +717,12 @@ for epoch in range(n_epochs):
         start_idx += n_cluster_samples
 
 # =========================
-# PLOT NLL AND ACCURACY
+# PLOT NLL
 # =========================
 epochs_range = range(1, n_epochs+1)
 plt.figure(figsize=(12,5))
 
-plt.subplot(1,2)
+plt.subplot(1,2,1)
 plt.plot(epochs_range, train_losses, label="Train NLL")
 plt.plot(epochs_range, val_losses, label="Val NLL")
 plt.xlabel("Epochs"); plt.ylabel("NLL"); plt.title("Training NLL")
