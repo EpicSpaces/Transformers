@@ -202,19 +202,18 @@ cm = confusion_matrix(all_labels, all_preds)
 cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
 
 # Plot confusion matrix counts
-plt.figure(figsize=(8,6))
-sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=range(10), yticklabels=range(10))
-plt.xlabel("Predicted")
-plt.ylabel("True")
-plt.title("Confusion Matrix (Counts)")
-plt.show()
+# Create annotation strings combining count and normalized value
+labels = np.empty_like(cm).astype(str)
+n_rows, n_cols = cm.shape
+for i in range(n_rows):
+    for j in range(n_cols):
+        labels[i, j] = f"{cm[i, j]}\n({cm_norm[i, j]:.2f})"
 
-# Plot normalized confusion matrix
 plt.figure(figsize=(8,6))
-sns.heatmap(cm_norm, annot=True, fmt='.2f', cmap='Blues', xticklabels=range(10), yticklabels=range(10))
+sns.heatmap(cm, annot=labels, fmt='', cmap='Blues', xticklabels=range(10), yticklabels=range(10))
 plt.xlabel("Predicted")
 plt.ylabel("True")
-plt.title("Confusion Matrix (Normalized)")
+plt.title("Confusion Matrix (Counts + Normalized)")
 plt.show()
 
 # -----------------------------
