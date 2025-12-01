@@ -365,14 +365,14 @@ class MultiBBHToyDataset(Dataset):
         plt.figure(figsize=(14,6))
         for k, h in enumerate(individual_signals):
             plt.plot(time, h.numpy(), label=f'BBH {k+1}')
-        
+
         plt.xlabel("Time [s]")
         plt.ylabel("Amplitude")
         plt.title(f"Sample {idx}: Multi-BBH Signals")
         plt.legend()
         plt.grid(True)
         plt.show()
-        
+
         plt.plot(time, self.sample_individuals_superposed, color='k', linestyle='--', label='Superposed signal')
         plt.plot(time, sample_signal.numpy(), color='r', alpha=0.5, label='Noisy + normalized signal')
         plt.xlabel("Time [s]")
@@ -608,8 +608,6 @@ opt = Adam(model.parameters(), lr=3e-4)
 # -------------------------
 train_losses = []
 val_losses   = []
-train_mae    = []
-val_mae      = []
 
 # A simple 20% validation split from your dataset
 val_size = int(0.2 * len(ds))
@@ -622,13 +620,6 @@ train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
 val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
 
 ds.plot_stored_sample()
-# -------------------------
-# Training Loop
-# -------------------------
-
-# METRICS STORAGE
-train_losses = []
-val_accuracies = []
 
 # =========================
 # TRAINING LOOP
@@ -662,6 +653,11 @@ for epoch in range(n_epochs):
             theta_arr = theta.reshape(B, n_signals, 4).cpu().numpy()
 
             mu, var = model(x)
+
+            val_nll = 0.5 * (((theta - mu)**2) / var + torch.log(var)).sum(dim=1).mean()
+
+            val_running_loss += val_nll.item()
+
             samples = sample_posterior(mu, var, n_samples=n_draws,
                                        T_obs=16, n_signals=n_signals).cpu().numpy()
 
@@ -670,6 +666,12 @@ for epoch in range(n_epochs):
                 samples_k = samples[:, k*4:(k+1)*4]
                 all_pred_samples.append(samples_k)
                 all_true_labels.append(np.full(samples_k.shape[0], k))
+
+    epoch_val_loss = val_running_loss / len(val_loader)
+
+    val_losses.append(epoch_val_loss)
+
+    print(f"Epoch {epoch+1}/{n_epochs} | "f"Train NLL={epoch_train_loss:.4f} | Val NLL={epoch_val_loss:.4f}")
 
     # Concatenate all BBHs
     all_pred_samples = np.concatenate(all_pred_samples)
@@ -697,28 +699,17 @@ for epoch in range(n_epochs):
         pred_labels[start_idx:start_idx+n_cluster_samples] = cluster_idx
         start_idx += n_cluster_samples
 
-    # ----- Compute accuracy -----
-    accuracy = 100 * np.mean(pred_labels == all_true_labels)
-    val_accuracies.append(accuracy)
-
-    print(f"Epoch {epoch+1}/{n_epochs} | Train NLL={epoch_train_loss:.4f} | Val Accuracy={accuracy:.2f}%")
-
 # =========================
 # PLOT NLL AND ACCURACY
 # =========================
 epochs_range = range(1, n_epochs+1)
 plt.figure(figsize=(12,5))
 
-plt.subplot(1,2,1)
+plt.subplot(1,2)
 plt.plot(epochs_range, train_losses, label="Train NLL")
+plt.plot(epochs_range, val_losses, label="Val NLL")
 plt.xlabel("Epochs"); plt.ylabel("NLL"); plt.title("Training NLL")
 plt.grid(True); plt.legend()
-
-plt.subplot(1,2,2)
-plt.plot(epochs_range, val_accuracies, label="Validation Accuracy")
-plt.xlabel("Epochs"); plt.ylabel("Accuracy (%)"); plt.title("Posterior-aware Accuracy")
-plt.grid(True); plt.legend()
-
 plt.tight_layout()
 plt.show()
 
