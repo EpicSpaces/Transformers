@@ -311,8 +311,11 @@ class MultiBBHToyDataset(Dataset):
         time = np.arange(self.signal_length) / self.fs
         superposed_signal = torch.stack(individual_signals).sum(dim=0).numpy()
 
+        # Scale individual signals to match the noisy + normalized signal
+        scaled_individuals = [h / superposed_signal.max() * sample_signal.abs().max() for h in individual_signals]
+
         plt.figure(figsize=(14,6))
-        for k, h in enumerate(individual_signals):
+        for k, h in enumerate(scaled_individuals):
             plt.plot(time, h.numpy(), label=f'BBH {k+1}')
         plt.plot(time, superposed_signal, color='k', linestyle='--', label='Superposed signal')
         plt.plot(time, sample_signal.numpy(), color='r', alpha=0.5, label='Noisy + normalized signal')
@@ -514,9 +517,9 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 # 5 Training loop
 # =========================
-num_samples   = 12
+num_samples   = 1
 signal_length = 2048
-batch_size    = 128
+batch_size    = 1
 n_epochs      = 400
 n_signals     = 3
 n_params      = n_signals * 4
