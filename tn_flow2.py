@@ -9,7 +9,7 @@ import corner
 from sklearn.cluster import SpectralClustering
 from scipy.optimize import linear_sum_assignment
 from pycbc.waveform import get_td_waveform
-from scipy.stats import ks_1samp, uniform
+from sklearn.metrics import confusion_matrix
 
 from typing import Tuple
 import seaborn as sns
@@ -461,6 +461,7 @@ batch_size    = 128
 n_epochs      = 400
 n_signals     = 3
 n_params      = n_signals * 4
+n_draws=2000
 
 ds = MultiBBHToyDataset(num_samples=num_samples,
                         signal_length=signal_length,
@@ -541,7 +542,7 @@ for epoch in range(n_epochs):
             theta_arr = theta.reshape(B, n_signals, 4).cpu().numpy()
 
             mu, var = model(x)
-            samples = sample_posterior(mu, var, n_samples=n_posterior_samples,
+            samples = sample_posterior(mu, var, n_samples=n_draws,
                                        T_obs=16, n_signals=n_signals).cpu().numpy()
 
             # Flatten samples per BBH
@@ -607,15 +608,23 @@ plt.show()
 cm = confusion_matrix(all_true_labels, pred_labels)
 cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
 
+# Plot confusion matrix counts
+# Create annotation strings combining count and normalized value
+labels_annotation = np.empty_like(cm).astype(str)
+n_rows, n_cols = cm.shape
+for i in range(n_rows):
+    for j in range(n_cols):
+        labels_annotation[i, j] = f"{cm[i, j]}\n({cm_norm[i, j]:.2f})"
+
 labels = [f"BBH_{i+1}" for i in range(n_signals)]
 
 plt.figure(figsize=(6,5))
-sns.heatmap(cm_norm, annot=True, fmt=".2f", cmap="Blues",
+sns.heatmap(cm, annot=labels_annotation, fmt='', cmap="Blues",
             xticklabels=labels, yticklabels=labels)
 
 plt.xlabel("Predicted Cluster")
 plt.ylabel("True BBH")
-plt.title("Posterior-aware Confusion Matrix (Normalized)")
+plt.title("Posterior-aware Confusion Matrix (Counts + Normalized)")
 plt.show()
 
 
@@ -626,7 +635,6 @@ x_obs = torch.stack([ds[i][0] for i in range(len(ds))]).unsqueeze(1).to(device)
 theta_all = torch.tensor(ds.theta).reshape(len(ds),-1)
 theta_batch = theta_all[:batch_size].numpy()   # [B, params]
 
-n_draws=2000
 with torch.no_grad():
     mean,var = model(x_obs)
 samples = sample_posterior(mean,var,n_samples=n_draws).cpu().numpy()
