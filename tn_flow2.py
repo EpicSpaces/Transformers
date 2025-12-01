@@ -504,89 +504,120 @@ val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
 # -------------------------
 # Training Loop
 # -------------------------
-for epoch in range(n_epochs):
 
-    # ======================
-    # TRAIN
-    # ======================
+# METRICS STORAGE
+train_losses = []
+val_accuracies = []
+
+# =========================
+# TRAINING LOOP
+# =========================
+for epoch in range(n_epochs):
+    # ====== TRAIN ======
     model.train()
     running_loss = 0
-    running_mae  = 0
-
     for x, theta in train_loader:
-        x     = x.unsqueeze(1).to(device)                   # [B,1,L]
-        theta = theta.reshape(theta.shape[0], -1).to(device)  # [B,K*4]
-
-        mean, var = model(x)
-        nll = 0.5 * (((theta - mean)**2) / var + torch.log(var)).sum(dim=1).mean()
-
+        B = x.shape[0]
+        x = x.unsqueeze(1).to(device)  # [B,1,L]
+        theta = theta.reshape(theta.shape[0],-1).to(device)  # [B,K*4]
+        mu, var = model(x)
+        nll = 0.5 * (((theta - mu)**2)/var + torch.log(var)).sum(dim=1).mean()
         opt.zero_grad()
         nll.backward()
         opt.step()
-
         running_loss += nll.item()
-        running_mae  += torch.mean(torch.abs(mean - theta)).item()
-
     epoch_train_loss = running_loss / len(train_loader)
-    epoch_train_mae  = running_mae  / len(train_loader)
-
     train_losses.append(epoch_train_loss)
-    train_mae.append(epoch_train_mae)
 
-    # ======================
-    # EVAL
-    # ======================
+    # ====== VALIDATION ======
     model.eval()
-    val_running_loss = 0
-    val_running_mae  = 0
+    all_pred_samples = []
+    all_true_labels = []
 
     with torch.no_grad():
         for x, theta in val_loader:
-            x     = x.unsqueeze(1).to(device)
-            theta = theta.reshape(theta.shape[0], -1).to(device)
+            B = x.shape[0]
+            x = x.unsqueeze(1).to(device)
+            theta_arr = theta.reshape(B, n_signals, 4).cpu().numpy()
 
-            mean, var = model(x)
-            val_nll = 0.5 * (((theta - mean)**2) / var + torch.log(var)).sum(dim=1).mean()
+            mu, var = model(x)
+            samples = sample_posterior(mu, var, n_samples=n_posterior_samples,
+                                       T_obs=16, n_signals=n_signals).cpu().numpy()
 
-            val_running_loss += val_nll.item()
-            val_running_mae  += torch.mean(torch.abs(mean - theta)).item()
+            # Flatten samples per BBH
+            for k in range(n_signals):
+                samples_k = samples[:, k*4:(k+1)*4]
+                all_pred_samples.append(samples_k)
+                all_true_labels.append(np.full(samples_k.shape[0], k))
 
-    epoch_val_loss = val_running_loss / len(val_loader)
-    epoch_val_mae  = val_running_mae  / len(val_loader)
+    # Concatenate all BBHs
+    all_pred_samples = np.concatenate(all_pred_samples)
+    all_true_labels = np.concatenate(all_true_labels)
 
-    val_losses.append(epoch_val_loss)
-    val_mae.append(epoch_val_mae)
+    # ----- Cluster posterior samples -----
+    clustered_samples, _ = cluster_posterior(all_pred_samples, n_clusters=n_signals)
 
-    print(f"Epoch {epoch+1}/{n_epochs} | "
-          f"Train NLL={epoch_train_loss:.4f} | Val NLL={epoch_val_loss:.4f} | "
-          f"Train MAE={epoch_train_mae:.4f} | Val MAE={epoch_val_mae:.4f}")
+    # ----- Hungarian reorder -----
+    # all_true_labels_per_bbh: list of arrays, one per BBH
+    true_samples_per_bbh = []
+    for k in range(n_signals):
+        # select the theta values for BBH k
+        true_samples_per_bbh.append(theta_arr[:, k, :])  # shape [B, 4]
+
+    # Hungarian reorder using true BBH samples as reference
+    clustered_reordered = reorder_clusters_to_reference(clustered_samples, true_samples_per_bbh)
 
 
-epochs_range = range(1, n_epochs + 1)
-plt.figure(figsize=(14,5))
+    # ----- Assign predicted labels -----
+    pred_labels = np.zeros_like(all_true_labels)
+    start_idx = 0
+    for cluster_idx, cluster in enumerate(clustered_reordered):
+        n_cluster_samples = cluster.shape[0]
+        pred_labels[start_idx:start_idx+n_cluster_samples] = cluster_idx
+        start_idx += n_cluster_samples
 
-# ================= Accuracy/MAE ==================
+    # ----- Compute accuracy -----
+    accuracy = 100 * np.mean(pred_labels == all_true_labels)
+    val_accuracies.append(accuracy)
+
+    print(f"Epoch {epoch+1}/{n_epochs} | Train NLL={epoch_train_loss:.4f} | Val Accuracy={accuracy:.2f}%")
+
+# =========================
+# PLOT NLL AND ACCURACY
+# =========================
+epochs_range = range(1, n_epochs+1)
+plt.figure(figsize=(12,5))
+
 plt.subplot(1,2,1)
-plt.plot(epochs_range, train_mae, label="Train MAE")
-plt.plot(epochs_range, val_mae, label="Val MAE")
-plt.xlabel("Epoch")
-plt.ylabel("MAE")
-plt.title("Training vs Validation MAE")
-plt.grid(True)
-plt.legend()
-
-# ================= Loss ==================
-plt.subplot(1,2,2)
 plt.plot(epochs_range, train_losses, label="Train NLL")
-plt.plot(epochs_range, val_losses, label="Val NLL")
-plt.xlabel("Epoch")
-plt.ylabel("NLL")
-plt.title("Training vs Validation Loss")
-plt.grid(True)
-plt.legend()
+plt.xlabel("Epochs"); plt.ylabel("NLL"); plt.title("Training NLL")
+plt.grid(True); plt.legend()
+
+plt.subplot(1,2,2)
+plt.plot(epochs_range, val_accuracies, label="Validation Accuracy")
+plt.xlabel("Epochs"); plt.ylabel("Accuracy (%)"); plt.title("Posterior-aware Accuracy")
+plt.grid(True); plt.legend()
 
 plt.tight_layout()
 plt.show()
+
+# -----------------------------
+# Compute confusion matrix for the last epoch
+# -----------------------------
+cm = confusion_matrix(all_true_labels, pred_labels)
+cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
+
+labels = [f"BBH_{i+1}" for i in range(n_signals)]
+
+plt.figure(figsize=(6,5))
+sns.heatmap(cm_norm, annot=True, fmt=".2f", cmap="Blues",
+            xticklabels=labels, yticklabels=labels)
+
+plt.xlabel("Predicted Cluster")
+plt.ylabel("True BBH")
+plt.title("Posterior-aware Confusion Matrix (Normalized)")
+plt.show()
+
 
 # =========================
 # 6 Posterior & Clustering
