@@ -271,7 +271,6 @@ class MultiBBHToyDataset(Dataset):
                 # SHIFT WAVEFORM IN TIME HERE (fixed)
                 # ---------------------------
 
-
                 # Convert PyCBC TimeSeries to numpy
                 hp_resampled_np = hp_resampled.numpy()
 
@@ -317,7 +316,7 @@ class MultiBBHToyDataset(Dataset):
                 sample_individuals.append(template_tensor)
 
             # Add noise and normalize
-            noise_scale = 0.05 * sample_signal.abs().max()
+            noise_scale = 0.5 * sample_signal.abs().max()
             # If this is the sample to inspect, store its individual waveforms
             if store_sample_idx is not None and i == store_sample_idx:
                 sample_signal_sp = (sample_signal - sample_signal.mean()) / (sample_signal.std() + 1e-20)
@@ -573,10 +572,10 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 # 5 Training loop
 # =========================
-num_samples   = 1
+num_samples   = 100
 signal_length = 2048
-batch_size    = 1
-n_epochs      = 400
+batch_size    = 100
+n_epochs      = 40
 n_signals     = 3
 n_params      = n_signals * 4
 n_draws=2000
@@ -628,6 +627,7 @@ for epoch in range(n_epochs):
     # ====== TRAIN ======
     model.train()
     running_loss = 0
+    val_running_loss = 0
     for x, theta in train_loader:
         B = x.shape[0]
         x = x.unsqueeze(1).to(device)  # [B,1,L]
@@ -651,10 +651,11 @@ for epoch in range(n_epochs):
             B = x.shape[0]
             x = x.unsqueeze(1).to(device)
             theta_arr = theta.reshape(B, n_signals, 4).cpu().numpy()
+            theta_flat = theta.reshape(theta.shape[0],-1).to(device)  # [B,K*4]
 
             mu, var = model(x)
 
-            val_nll = 0.5 * (((theta - mu)**2) / var + torch.log(var)).sum(dim=1).mean()
+            val_nll = 0.5 * (((theta_flat - mu)**2) / var + torch.log(var)).sum(dim=1).mean()
 
             val_running_loss += val_nll.item()
 
