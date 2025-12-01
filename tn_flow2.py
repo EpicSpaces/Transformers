@@ -249,7 +249,7 @@ class MultiBBHToyDataset(Dataset):
             sample_individuals = []
 
             for k in range(K):
-                m1 = np.random.uniform(20, 60)
+                m1 = np.random.uniform(1, 31)
                 m2 = np.random.uniform(5, m1)
                 q = m2 / m1
                 t0 = np.random.uniform(0, signal_length / fs)
@@ -266,44 +266,50 @@ class MultiBBHToyDataset(Dataset):
                 # Resample
                 hp_resampled = resample_to_delta_t(hp, target_dt)
 
-                print("Original length:", len(hp))
-                print("Resampled length:", len(hp_resampled))
+                # ---------------------------
+                # SHIFT WAVEFORM IN TIME HERE (fixed)
+                # ---------------------------
 
-                if len(hp_resampled) < signal_length:
-                  pad_total = signal_length - len(hp_resampled)
-                  pad_left = pad_total // 2
-                  pad_right = pad_total - pad_left
-                  hp_resampled = torch.cat([
-                      torch.zeros(pad_left),
-                      torch.tensor(hp_resampled.numpy(), dtype=torch.float32),
-                      torch.zeros(pad_right)
-                  ])
+                
+                # Convert PyCBC TimeSeries to numpy
+                hp_resampled_np = hp_resampled.numpy()
 
-                #if len(hp_resampled) < signal_length0:
-                    # pad with zeros
-                #    hp_resampled = torch.cat([torch.zeros(signal_length0 - len(hp_resampled)), torch.tensor(hp_resampled.numpy(), dtype=torch.float32)])
-                elif len(hp_resampled) > signal_length:
-                    # truncate
-                    hp_resampled = torch.tensor(hp_resampled.numpy(), dtype=torch.float32)[-signal_length:]
-                else:
-                    hp_resampled = torch.tensor(hp_resampled.numpy(), dtype=torch.float32)
+                # Truncate waveform to signal_length if too long
+                if len(hp_resampled_np) > signal_length:
+                    hp_resampled_np = hp_resampled_np[-signal_length:]  # keep start, not the merger at the end
 
-                hp=hp_resampled
-                self.signal_length=len(hp_resampled)
+                # Convert to torch tensor
+                hp_tensor = torch.tensor(hp_resampled_np, dtype=torch.float32)
+                
+                # Random shift in seconds, left or right, up to ±150 ms
+                t_shift = np.random.uniform(0.0, 0.9)
+                shift_samples = int(t_shift * target_fs)
+                
+                # Pad waveform so we can safely shift left or right
+                hp_shifted = np.pad(hp_resampled_np, (max(0, shift_samples), max(0, -shift_samples)), mode='constant')
 
-                #if len(hp) < self.signal_length:
-                #    hp.resize(self.signal_length)
-                #else:
-                #    hp = hp[:self.signal_length]
+                # Allocate final waveform array
+                final_waveform = torch.zeros(signal_length, dtype=torch.float32)
 
-                # Convert to tensor
-                template_tensor = torch.tensor(hp.numpy(), dtype=torch.float32)
-                #template_tensor = template_tensor / template_tensor.abs().max()
-                template_tensor = (template_tensor - template_tensor.mean()) / hp_resampled.std()
+                # Truncate to signal length, keeping merger inside
+                final_waveform = hp_shifted[:signal_length]
+                
+                # Update hp_shifted
+                hp_shifted = final_waveform
 
-                # Optional cyclic shift
-                #shift = torch.randint(0, self.signal_length, (1,)).item()
-                #template_tensor = torch.cat([template_tensor[-shift:], template_tensor[:-shift]])
+                # Convert to template tensor and normalize
+                template_tensor = torch.tensor(hp_shifted, dtype=torch.float32)
+                template_tensor = (template_tensor - template_tensor.mean()) / (template_tensor.std() + 1e-8)
+
+                #time = np.arange(self.signal_length) / self.fs
+                #plt.figure(figsize=(14,6))
+                #plt.plot(time, hp_tensor.numpy(), label=f'BBH {k+1}')
+                #plt.xlabel("Time [s]")
+                #plt.ylabel("Amplitude")
+                #plt.title(f"Sample : Multi-BBH Signals")
+                #plt.legend()
+                #plt.grid(True)
+                #plt.show()
 
                 
                 sample_signal += template_tensor
@@ -351,10 +357,10 @@ class MultiBBHToyDataset(Dataset):
         scaled_individuals = [h / superposed_signal.max() * sample_signal.abs().max() for h in individual_signals]
 
         plt.figure(figsize=(14,6))
-        for k, h in enumerate(scaled_individuals):
+        for k, h in enumerate(individual_signals):
             plt.plot(time, h.numpy(), label=f'BBH {k+1}')
-        plt.plot(time, superposed_signal, color='k', linestyle='--', label='Superposed signal')
-        plt.plot(time, sample_signal.numpy(), color='r', alpha=0.5, label='Noisy + normalized signal')
+        #plt.plot(time, superposed_signal, color='k', linestyle='--', label='Superposed signal')
+        #plt.plot(time, sample_signal.numpy(), color='r', alpha=0.5, label='Noisy + normalized signal')
         plt.xlabel("Time [s]")
         plt.ylabel("Amplitude")
         plt.title(f"Sample {idx}: Multi-BBH Signals")
