@@ -9,6 +9,7 @@ import corner
 from sklearn.cluster import SpectralClustering
 from scipy.optimize import linear_sum_assignment
 from pycbc.waveform import get_td_waveform
+from pycbc.filter import resample_to_delta_t
 from sklearn.metrics import confusion_matrix
 
 from typing import Tuple
@@ -259,19 +260,54 @@ class MultiBBHToyDataset(Dataset):
                                         mass1=m1, mass2=m2,
                                         delta_t=1.0/fs,
                                         f_lower=f_lower)
-                h = torch.tensor(hp.data, dtype=torch.float32)
+                target_fs = 256  # Hz
+                target_dt = 1.0 / target_fs
 
-                # Pad or truncate
-                if len(h) < signal_length:
-                    h = torch.cat([torch.zeros(signal_length - len(h)), h])
+                # Resample
+                hp_resampled = resample_to_delta_t(hp, target_dt)
+
+                print("Original length:", len(hp))
+                print("Resampled length:", len(hp_resampled))
+
+                if len(hp_resampled) < signal_length:
+                  pad_total = signal_length - len(hp_resampled)
+                  pad_left = pad_total // 2
+                  pad_right = pad_total - pad_left
+                  hp_resampled = torch.cat([
+                      torch.zeros(pad_left),
+                      torch.tensor(hp_resampled.numpy(), dtype=torch.float32),
+                      torch.zeros(pad_right)
+                  ])
+
+                #if len(hp_resampled) < signal_length0:
+                    # pad with zeros
+                #    hp_resampled = torch.cat([torch.zeros(signal_length0 - len(hp_resampled)), torch.tensor(hp_resampled.numpy(), dtype=torch.float32)])
+                elif len(hp_resampled) > signal_length:
+                    # truncate
+                    hp_resampled = torch.tensor(hp_resampled.numpy(), dtype=torch.float32)[-signal_length:]
                 else:
-                    h = h[-signal_length:]
+                    hp_resampled = torch.tensor(hp_resampled.numpy(), dtype=torch.float32)
 
-                # Apply random scaling
-                h_scaled = h * np.random.uniform(0.5, 1.0)
+                hp=hp_resampled
+                self.signal_length=len(hp_resampled)
 
-                sample_signal += h_scaled
-                sample_individuals.append(h_scaled)
+                #if len(hp) < self.signal_length:
+                #    hp.resize(self.signal_length)
+                #else:
+                #    hp = hp[:self.signal_length]
+
+                # Convert to tensor
+                template_tensor = torch.tensor(hp.numpy(), dtype=torch.float32)
+                #template_tensor = template_tensor / template_tensor.abs().max()
+                template_tensor = (template_tensor - template_tensor.mean()) / hp_resampled.std()
+
+                # Optional cyclic shift
+                #shift = torch.randint(0, self.signal_length, (1,)).item()
+                #template_tensor = torch.cat([template_tensor[-shift:], template_tensor[:-shift]])
+
+                
+                sample_signal += template_tensor
+                sample_individuals.append(template_tensor)
 
             # Add noise and normalize
             noise_scale = 0.05 * sample_signal.abs().max()
