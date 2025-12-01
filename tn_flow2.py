@@ -212,9 +212,20 @@ class SelfAttention(nn.Module):
 # =========================
 # 1 Multi-BBH Toy Dataset
 # =========================
+import torch
+from torch.utils.data import Dataset
+import numpy as np
+import matplotlib.pyplot as plt
+from pycbc.waveform import get_td_waveform
+
 class MultiBBHToyDataset(Dataset):
     def __init__(self, num_samples=100, signal_length=2048, K=3, fs=1024,
-                 f_lower=5, seed=42):
+                 f_lower=5, seed=42, store_sample_idx=None):
+        """
+        store_sample_idx: int or None
+            If an integer index is provided, stores the individual BBH waveforms
+            of that sample in self.stored_sample_individuals for inspection.
+        """
         super().__init__()
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -226,46 +237,94 @@ class MultiBBHToyDataset(Dataset):
         self.f_lower = f_lower
 
         self.signals = torch.zeros(num_samples, signal_length, dtype=torch.float32)
-        self.theta = []       # True parameters [m1,m2,q,t] per BBH
+        self.theta = []                       # True parameters [m1, m2, q, t0] per BBH
+        self.individual_waveforms = []        # Store all individual BBH waveforms
+        self.stored_sample_individuals = None # Optional storage for a chosen sample
+        self.stored_sample_idx = store_sample_idx
 
         for i in range(num_samples):
             sample_signal = torch.zeros(signal_length, dtype=torch.float32)
             sample_params = []
+            sample_individuals = []
 
             for k in range(K):
-                m1 = np.random.uniform(20,60)
-                m2 = np.random.uniform(5,m1)
-                q = m2/m1
-                t0 = np.random.uniform(0, signal_length/fs)
-                sample_params.append([m1,m2,q,t0])
+                m1 = np.random.uniform(20, 60)
+                m2 = np.random.uniform(5, m1)
+                q = m2 / m1
+                t0 = np.random.uniform(0, signal_length / fs)
+                sample_params.append([m1, m2, q, t0])
 
-                # Generate PyCBC waveform
-                hp,_ = get_td_waveform(approximant='IMRPhenomXPHM',
+                # Generate waveform once
+                hp, _ = get_td_waveform(approximant='IMRPhenomXPHM',
                                         mass1=m1, mass2=m2,
                                         delta_t=1.0/fs,
                                         f_lower=f_lower)
-                h = torch.tensor(hp.data,dtype=torch.float32)
+                h = torch.tensor(hp.data, dtype=torch.float32)
+
+                # Pad or truncate
                 if len(h) < signal_length:
-                    h = torch.cat([torch.zeros(signal_length-len(h)), h])
+                    h = torch.cat([torch.zeros(signal_length - len(h)), h])
                 else:
                     h = h[-signal_length:]
-                sample_signal += np.random.uniform(0.5,1.0)*h
 
-            # Add noise and whiten
-            sample_signal += 0.05*sample_signal.abs().max()*torch.randn_like(sample_signal)
-            sample_signal = (sample_signal-sample_signal.mean())/(sample_signal.std()+1e-20)
+                # Apply random scaling
+                h_scaled = h * np.random.uniform(0.5, 1.0)
+
+                sample_signal += h_scaled
+                sample_individuals.append(h_scaled)
+
+            # Add noise and normalize
+            noise_scale = 0.05 * sample_signal.abs().max()
+            sample_signal += noise_scale * torch.randn_like(sample_signal)
+            sample_signal = (sample_signal - sample_signal.mean()) / (sample_signal.std() + 1e-20)
 
             self.signals[i] = sample_signal
             self.theta.append(sample_params)
+            self.individual_waveforms.append(sample_individuals)
 
-        self.theta = np.array(self.theta)           # [N,K,4]
+            # If this is the sample to inspect, store its individual waveforms
+            if store_sample_idx is not None and i == store_sample_idx:
+                self.stored_sample_individuals = sample_individuals
+
+        self.theta = np.array(self.theta, dtype=np.float32)  # shape: [N, K, 4]
 
     def __len__(self):
         return self.num_samples
 
     def __getitem__(self, idx):
-        return (self.signals[idx],
-                torch.tensor(self.theta[idx],dtype=torch.float32))
+        return self.signals[idx], torch.tensor(self.theta[idx], dtype=torch.float32)
+
+    def plot_stored_sample(self):
+        """
+        Plot the individual BBH signals, superposed waveform, and noisy signal
+        of the stored sample, if available.
+        """
+        if self.stored_sample_individuals is None or self.stored_sample_idx is None:
+            print("No stored sample. Please pass store_sample_idx when initializing the dataset.")
+            return
+
+        idx = self.stored_sample_idx
+        sample_signal = self.signals[idx]
+        individual_signals = self.stored_sample_individuals
+        sample_params = self.theta[idx]
+
+        time = np.arange(self.signal_length) / self.fs
+        superposed_signal = torch.stack(individual_signals).sum(dim=0).numpy()
+
+        plt.figure(figsize=(14,6))
+        for k, h in enumerate(individual_signals):
+            plt.plot(time, h.numpy(), label=f'BBH {k+1}')
+        plt.plot(time, superposed_signal, color='k', linestyle='--', label='Superposed signal')
+        plt.plot(time, sample_signal.numpy(), color='r', alpha=0.5, label='Noisy + normalized signal')
+        plt.xlabel("Time [s]")
+        plt.ylabel("Amplitude")
+        plt.title(f"Sample {idx}: Multi-BBH Signals")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+        print(f"Sample {idx} BBH parameters [m1, m2, q, t0] per BBH:\n", sample_params)
+
 
 # =========================
 # 2 Transformer Model
@@ -468,7 +527,8 @@ ds = MultiBBHToyDataset(num_samples=num_samples,
                         K=n_signals,
                         fs=2048,
                         f_lower=5,
-                        seed=42)
+                        seed=42,
+                        store_sample_idx=0)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -502,6 +562,7 @@ train_ds, val_ds = torch.utils.data.random_split(ds, [train_size, val_size])
 train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
 val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
 
+ds.plot_stored_sample()
 # -------------------------
 # Training Loop
 # -------------------------
@@ -818,4 +879,3 @@ plt.title("Violin Plot of Posterior Samples with True Values for 12 BBH Paramete
 plt.grid(alpha=0.3)
 plt.legend()
 plt.show()
-
