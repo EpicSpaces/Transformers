@@ -150,7 +150,7 @@ optimizer = Adam(model.parameters(), lr=config["lr"])
 criterion = nn.CrossEntropyLoss()
 
 # -----------------------------
-# TRAINING & EVALUATION FUNCTIONS
+# TRAINING FUNCTIONS
 # -----------------------------
 def train_one_epoch(model, loader, optimizer, criterion, device):
     model.train()
@@ -165,44 +165,48 @@ def train_one_epoch(model, loader, optimizer, criterion, device):
         total_loss += loss.item()
     return total_loss / len(loader)
 
-def evaluate(model, loader, device):
+def evaluate(model, loader, criterion, device):
     model.eval()
+    total_loss = 0
     all_labels, all_preds = [], []
     with torch.no_grad():
         for x, y in loader:
             x, y = x.to(device), y.to(device)
             outputs = model(x)
+            loss = criterion(outputs, y)
+            total_loss += loss.item()
             _, preds = torch.max(outputs, 1)
             all_labels.append(y.cpu().numpy())
             all_preds.append(preds.cpu().numpy())
+    avg_loss = total_loss / len(loader)
     all_labels = np.concatenate(all_labels)
     all_preds = np.concatenate(all_preds)
-    accuracy = 100 * np.mean(all_preds == all_labels)
-    return accuracy, all_labels, all_preds
+    return avg_loss, all_labels, all_preds
 
 # -----------------------------
 # TRAIN LOOP
 # -----------------------------
-train_losses, test_accuracies = [], []
+train_losses, val_losses = [], []
+all_labels_final, all_preds_final = None, None
 
 for epoch in range(config["epochs"]):
-    loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
-    acc, all_labels, all_preds = evaluate(model, test_loader, device)
-
-    train_losses.append(loss)
-    test_accuracies.append(acc)
-
-    print(f"Epoch {epoch+1}/{config['epochs']} | Loss: {loss:.4f} | Accuracy: {acc:.2f}%")
+    train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
+    val_loss, all_labels, all_preds = evaluate(model, test_loader, criterion, device)
+    
+    train_losses.append(train_loss)
+    val_losses.append(val_loss)
+    
+    all_labels_final, all_preds_final = all_labels, all_preds
+    
+    print(f"Epoch {epoch+1}/{config['epochs']} | "
+          f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
 
 # -----------------------------
-# FINAL EVALUATION: CONFUSION MATRIX
+# CONFUSION MATRIX
 # -----------------------------
-
-cm = confusion_matrix(all_labels, all_preds)
+cm = confusion_matrix(all_labels_final, all_preds_final)
 cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
 
-# Plot confusion matrix counts
-# Create annotation strings combining count and normalized value
 labels = np.empty_like(cm).astype(str)
 n_rows, n_cols = cm.shape
 for i in range(n_rows):
@@ -217,25 +221,16 @@ plt.title("Confusion Matrix (Counts + Normalized)")
 plt.show()
 
 # -----------------------------
-# TRAIN LOSS & TEST ACCURACY PLOTS
+# TRAIN & VAL LOSS PLOTS
 # -----------------------------
 epochs_range = range(1, config["epochs"]+1)
 
-plt.figure(figsize=(12,5))
-plt.subplot(1,2,1)
+plt.figure(figsize=(10,5))
 plt.plot(epochs_range, train_losses, label="Train Loss")
+plt.plot(epochs_range, val_losses, label="Validation Loss", color='orange')
 plt.xlabel("Epochs")
-plt.ylabel("Loss")
-plt.title("Training Loss")
+plt.ylabel("Loss (NLL)")
+plt.title("Train and Validation NLL Loss")
 plt.grid(True)
 plt.legend()
-
-plt.subplot(1,2,2)
-plt.plot(epochs_range, test_accuracies, label="Test Accuracy")
-plt.xlabel("Epochs")
-plt.ylabel("Accuracy (%)")
-plt.title("Test Accuracy")
-plt.grid(True)
-plt.legend()
-plt.tight_layout()
 plt.show()
