@@ -241,6 +241,7 @@ class MultiBBHToyDataset(Dataset):
         self.theta = []                       # True parameters [m1, m2, q, t0] per BBH
         self.individual_waveforms = []        # Store all individual BBH waveforms
         self.stored_sample_individuals = None # Optional storage for a chosen sample
+        self.sample_individuals_superposed=None
         self.stored_sample_idx = store_sample_idx
 
         for i in range(num_samples):
@@ -249,7 +250,7 @@ class MultiBBHToyDataset(Dataset):
             sample_individuals = []
 
             for k in range(K):
-                m1 = np.random.uniform(1, 31)
+                m1 = np.random.uniform(100, 310)
                 m2 = np.random.uniform(5, m1)
                 q = m2 / m1
                 t0 = np.random.uniform(0, signal_length / fs)
@@ -270,7 +271,7 @@ class MultiBBHToyDataset(Dataset):
                 # SHIFT WAVEFORM IN TIME HERE (fixed)
                 # ---------------------------
 
-                
+
                 # Convert PyCBC TimeSeries to numpy
                 hp_resampled_np = hp_resampled.numpy()
 
@@ -280,11 +281,11 @@ class MultiBBHToyDataset(Dataset):
 
                 # Convert to torch tensor
                 hp_tensor = torch.tensor(hp_resampled_np, dtype=torch.float32)
-                
+
                 # Random shift in seconds, left or right, up to ±150 ms
-                t_shift = np.random.uniform(0.0, 0.9)
+                t_shift = np.random.uniform(-0.9, 0.9)
                 shift_samples = int(t_shift * target_fs)
-                
+
                 # Pad waveform so we can safely shift left or right
                 hp_shifted = np.pad(hp_resampled_np, (max(0, shift_samples), max(0, -shift_samples)), mode='constant')
 
@@ -293,7 +294,7 @@ class MultiBBHToyDataset(Dataset):
 
                 # Truncate to signal length, keeping merger inside
                 final_waveform = hp_shifted[:signal_length]
-                
+
                 # Update hp_shifted
                 hp_shifted = final_waveform
 
@@ -311,12 +312,17 @@ class MultiBBHToyDataset(Dataset):
                 #plt.grid(True)
                 #plt.show()
 
-                
+
                 sample_signal += template_tensor
                 sample_individuals.append(template_tensor)
 
             # Add noise and normalize
             noise_scale = 0.05 * sample_signal.abs().max()
+            # If this is the sample to inspect, store its individual waveforms
+            if store_sample_idx is not None and i == store_sample_idx:
+                sample_signal_sp = (sample_signal - sample_signal.mean()) / (sample_signal.std() + 1e-20)
+                self.sample_individuals_superposed = sample_signal_sp
+
             sample_signal += noise_scale * torch.randn_like(sample_signal)
             sample_signal = (sample_signal - sample_signal.mean()) / (sample_signal.std() + 1e-20)
 
@@ -359,8 +365,16 @@ class MultiBBHToyDataset(Dataset):
         plt.figure(figsize=(14,6))
         for k, h in enumerate(individual_signals):
             plt.plot(time, h.numpy(), label=f'BBH {k+1}')
-        #plt.plot(time, superposed_signal, color='k', linestyle='--', label='Superposed signal')
-        #plt.plot(time, sample_signal.numpy(), color='r', alpha=0.5, label='Noisy + normalized signal')
+        
+        plt.xlabel("Time [s]")
+        plt.ylabel("Amplitude")
+        plt.title(f"Sample {idx}: Multi-BBH Signals")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+        
+        plt.plot(time, self.sample_individuals_superposed, color='k', linestyle='--', label='Superposed signal')
+        plt.plot(time, sample_signal.numpy(), color='r', alpha=0.5, label='Noisy + normalized signal')
         plt.xlabel("Time [s]")
         plt.ylabel("Amplitude")
         plt.title(f"Sample {idx}: Multi-BBH Signals")
