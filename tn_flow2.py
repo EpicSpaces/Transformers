@@ -220,7 +220,7 @@ import matplotlib.pyplot as plt
 from pycbc.waveform import get_td_waveform
 
 class MultiBBHToyDataset(Dataset):
-    def __init__(self, num_samples=100, signal_length=2048, K=3, fs=1024,
+    def __init__(self, batch_size=100, signal_length=2048, K=3, fs=1024,
                  f_lower=5, seed=42, store_sample_idx=None):
         """
         store_sample_idx: int or None
@@ -231,20 +231,20 @@ class MultiBBHToyDataset(Dataset):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
-        self.num_samples = num_samples
+        self.batch_size = batch_size
         self.signal_length = signal_length
         self.K = K
         self.fs = fs
         self.f_lower = f_lower
 
-        self.signals = torch.zeros(num_samples, signal_length, dtype=torch.float32)
+        self.signals = torch.zeros(batch_size, signal_length, dtype=torch.float32)
         self.theta = []                       # True parameters [m1, m2, q, t0] per BBH
         self.individual_waveforms = []        # Store all individual BBH waveforms
         self.stored_sample_individuals = None # Optional storage for a chosen sample
         self.sample_individuals_superposed=None
         self.stored_sample_idx = store_sample_idx
 
-        for i in range(num_samples):
+        for i in range(batch_size):
             sample_signal = torch.zeros(signal_length, dtype=torch.float32)
             sample_params = []
             sample_individuals = []
@@ -336,7 +336,7 @@ class MultiBBHToyDataset(Dataset):
         self.theta = np.array(self.theta, dtype=np.float32)  # shape: [N, K, 4]
 
     def __len__(self):
-        return self.num_samples
+        return self.batch_size
 
     def __getitem__(self, idx):
         x = self.signals[idx]               # [L]
@@ -588,15 +588,14 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 # 5 Training loop
 # =========================
-num_samples   = 10
 signal_length = 2048
-batch_size    = 10
-n_epochs      = 40
+batch_size    = 128
+n_epochs      = 1000
 n_signals     = 3
 n_params      = n_signals * 4
-n_draws=2000
+n_draws=10000
 
-ds = MultiBBHToyDataset(num_samples=num_samples,
+ds = MultiBBHToyDataset(batch_size=batch_size,
                         signal_length=signal_length,
                         K=n_signals,
                         fs=2048,
@@ -631,8 +630,8 @@ print("val_size :", val_size)
 print("train_size :", train_size)
 
 train_ds, val_ds = torch.utils.data.random_split(ds, [train_size, val_size])
-train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
+train_loader = DataLoader(train_ds, batch_size=train_size, shuffle=True)
+val_loader   = DataLoader(val_ds,   batch_size=val_size, shuffle=False)
 
 ds.plot_stored_sample()
 
@@ -840,4 +839,3 @@ for k, cluster in enumerate(clustered_np):
             ax2.axhline(true_values[i], color=color, linestyle="-", lw=1)
 
 plt.show()
-
