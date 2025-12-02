@@ -255,8 +255,8 @@ class MultiBBHToyDataset(Dataset):
             for k in range(K):
                 desired_merger_time = desired_merger_times[k]
 
-                m1 = np.random.uniform(100, 310)
-                m2 = np.random.uniform(5, m1)
+                m1 = np.random.uniform(5, 310)
+                m2 = np.random.uniform(5, 310)
                 q = m2 / m1
                 t0 = np.random.uniform(0, signal_length / fs)
                 sample_params.append([m1, m2, q, t0])
@@ -294,28 +294,40 @@ class MultiBBHToyDataset(Dataset):
             plt.figure(figsize=(14,6))
 
             # --- Place each waveform into global buffer and plot ---
-            for i, (hp_shifted, template_tensor) in enumerate(shifted_signals):
+            for j, (hp_shifted, template_tensor) in enumerate(shifted_signals):
                 idx_start = int(round((hp_shifted.sample_times[0] - global_start) / target_dt))
                 idx_end   = idx_start + len(template_tensor)
                 idx_end = min(idx_end, global_len)
                 tensor_end = idx_end - idx_start
 
                 superposed_signal[idx_start:idx_end] += template_tensor[:tensor_end]
-
-                plt.plot(hp_shifted.sample_times, template_tensor.numpy(),
-                        label=f'Signal {i+1}, merger {desired_merger_times[i]:.2f}s')
+                if(i==0):
+                    plt.plot(hp_shifted.sample_times, template_tensor.numpy(),
+                            label=f'Signal {j+1}, merger {desired_merger_times[j]:.2f}s')
+                    plt.xlabel("Time [s]")
+                    plt.ylabel("Amplitude")
+                    plt.title(f"Time-domain waveform")
+                    plt.axvline(desired_merger_times[j], color='r', linestyle='--', label='Merger Peak')
+                    
+            
+            if(i==0):
+                plt.legend()
+                plt.grid(True)
+                plt.show()
+                
+                plt.plot(global_time, superposed_signal.numpy(), color='k', linewidth=2, label='Superposed')
 
             # --- Add noise and plot superposition ---
             superposed_signal += torch.randn(global_len) * noise_std
-            plt.plot(global_time, superposed_signal.numpy(), color='k', linewidth=2, label='Superposed + noise')
+            if(i==0):
+                plt.plot(global_time, superposed_signal.numpy(), color='r', alpha=0.5, linewidth=2, label='Superposed + noise')
 
-            plt.xlabel("Time [s]")
-            plt.ylabel("Amplitude")
-            plt.title("Multiple Signals with Different Merger Times + Superposed Noise")
-            plt.axvline(0, color='r', linestyle='--', label='Reference t=0')
-            plt.legend()
-            plt.grid(True)
-            plt.show()
+                plt.xlabel("Time [s]")
+                plt.ylabel("Amplitude")
+                plt.title("Multiple Signals with Different Merger Times + Superposed Noise")
+                plt.legend()
+                plt.grid(True)
+                plt.show()
 
             superposed_signal_cropped=None
             # Crop last `signal_length` samples if too long
