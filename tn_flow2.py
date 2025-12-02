@@ -315,13 +315,12 @@ class MultiBBHToyDataset(Dataset):
                 plt.grid(True)
                 plt.show()
                 
-                plt.plot(global_time, superposed_signal.numpy(), color='k', linewidth=2, label='Superposed')
-
             # --- Add noise and plot superposition ---
-            superposed_signal += torch.randn(global_len) * noise_std
+            noisy_signal = superposed_signal + torch.randn_like(superposed_signal) * 0.2 * superposed_signal.abs().max()
             if(i==0):
-                plt.plot(global_time, superposed_signal.numpy(), color='r', alpha=0.5, linewidth=2, label='Superposed + noise')
-
+                plt.plot(global_time, superposed_signal.numpy(), color='k', linewidth=2, label='Superposed')
+                plt.plot(global_time, noisy_signal.numpy(), color='r', alpha=0.5, linewidth=2, label='Superposed + noise')
+                
                 plt.xlabel("Time [s]")
                 plt.ylabel("Amplitude")
                 plt.title("Multiple Signals with Different Merger Times + Superposed Noise")
