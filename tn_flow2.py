@@ -14,7 +14,7 @@ from sklearn.metrics import confusion_matrix
 
 from typing import Tuple
 import seaborn as sns
-from scipy.stats import wasserstein_distance
+from pycbc.types import TimeSeries
 
 torch.manual_seed(42)
 np.random.seed(42)
@@ -239,15 +239,15 @@ class MultiBBHToyDataset(Dataset):
 
         self.signals = torch.zeros(batch_size, signal_length, dtype=torch.float32)
         self.theta = []                       # True parameters [m1, m2, q, t0] per BBH
-        self.individual_waveforms = []        # Store all individual BBH waveforms
-        self.stored_sample_individuals = None # Optional storage for a chosen sample
-        self.sample_individuals_superposed=None
-        self.stored_sample_idx = store_sample_idx
-
+        
         for i in range(batch_size):
             sample_signal = torch.zeros(signal_length, dtype=torch.float32)
             sample_params = []
             sample_individuals = []
+            sample_individuals_tensor = []
+            sample_desired_merger_time = []
+            sample_time = []
+            sample_peak = []
 
             for k in range(K):
                 m1 = np.random.uniform(100, 310)
@@ -265,73 +265,123 @@ class MultiBBHToyDataset(Dataset):
                 target_dt = 1.0 / target_fs
 
                 # Resample
-                hp_resampled = resample_to_delta_t(hp, target_dt)
+                hp = resample_to_delta_t(hp, target_dt)
+                
+                desired_merger_time = np.random.uniform(-10.9, 10.9)   # target merger time in seconds
+            
+                # --- Compute time shift so merger occurs at desired time ---
+                # Find index of max amplitude
+                merger_index = np.argmax(np.abs(hp))
 
-                # ---------------------------
-                # SHIFT WAVEFORM IN TIME HERE (fixed)
-                # ---------------------------
+                # Time of the peak before shift
+                peak_time_original = hp.sample_times[merger_index]
 
-                # Convert PyCBC TimeSeries to numpy
-                hp_resampled_np = hp_resampled.numpy()
+                # Compute shift so peak aligns with desired_merger_time
+                time_shift = desired_merger_time - peak_time_original
 
-                # Truncate waveform to signal_length if too long
-                if len(hp_resampled_np) > signal_length:
-                    hp_resampled_np = hp_resampled_np[-signal_length:]  # keep start, not the merger at the end
+                # --- Shift waveform by adjusting epoch (keeps your style) ---
+                hp_shifted = TimeSeries(hp, delta_t=hp.delta_t, epoch=hp.start_time + time_shift)
 
-                # Convert to torch tensor
-                hp_tensor = torch.tensor(hp_resampled_np, dtype=torch.float32)
-
-                # Random shift in seconds, left or right, up to ±150 ms
-                t_shift = np.random.uniform(-0.9, 0.9)
-                shift_samples = int(t_shift * target_fs)
-
-                # Pad waveform so we can safely shift left or right
-                hp_shifted = np.pad(hp_resampled_np, (max(0, shift_samples), max(0, -shift_samples)), mode='constant')
-
-                # Allocate final waveform array
-                final_waveform = torch.zeros(signal_length, dtype=torch.float32)
-
-                # Truncate to signal length, keeping merger inside
-                final_waveform = hp_shifted[:signal_length]
-
-                # Update hp_shifted
-                hp_shifted = final_waveform
+                # --- Find merger index (max amplitude) ---
+                merger_index = np.argmax(np.abs(hp_shifted))
+     
+                # --- Verification ---
+                #print("Waveform start time:", hp_shifted.sample_times[0])
 
                 # Convert to template tensor and normalize
                 template_tensor = torch.tensor(hp_shifted, dtype=torch.float32)
+                # Crop or pad to match signal_length
+
+                time = hp_shifted.sample_times  # perfect match
+                
+                if template_tensor.size(0) > signal_length:
+                    template_tensor = template_tensor[-signal_length:]  # take last samples
+                    time = hp_shifted.sample_times[-signal_length:]
+                elif template_tensor.size(0) < signal_length:
+                    pad = signal_length - template_tensor.size(0)
+                    template_tensor = torch.cat([torch.zeros(pad), template_tensor])
+                    time = np.concatenate([np.zeros(pad), hp_shifted.sample_times])
+
+                # Normalize
                 template_tensor = (template_tensor - template_tensor.mean()) / (template_tensor.std() + 1e-8)
 
-                #time = np.arange(self.signal_length) / self.fs
-                #plt.figure(figsize=(14,6))
-                #plt.plot(time, hp_tensor.numpy(), label=f'BBH {k+1}')
-                #plt.xlabel("Time [s]")
-                #plt.ylabel("Amplitude")
-                #plt.title(f"Sample : Multi-BBH Signals")
-                #plt.legend()
-                #plt.grid(True)
-                #plt.show()
-
-
                 sample_signal += template_tensor
-                sample_individuals.append(template_tensor)
+                sample_individuals.append(hp_shifted)
+                sample_individuals_tensor.append(template_tensor)
+                merger_idx_tensor = np.argmax(np.abs(template_tensor))
+                time_global = time - time[merger_idx_tensor]
+                sample_desired_merger_time.append(time_global)
+                sample_time.append(time)
+                sample_peak.append(merger_index)
 
             # Add noise and normalize
             noise_scale = 0.5 * sample_signal.abs().max()
-            # If this is the sample to inspect, store its individual waveforms
-            if store_sample_idx is not None and i == store_sample_idx:
-                sample_signal_sp = (sample_signal - sample_signal.mean()) / (sample_signal.std() + 1e-20)
-                self.sample_individuals_superposed = sample_signal_sp
-
+            superposed_signal = sample_signal
             sample_signal += noise_scale * torch.randn_like(sample_signal)
             sample_signal = (sample_signal - sample_signal.mean()) / (sample_signal.std() + 1e-20)
 
             self.signals[i] = sample_signal
             self.theta.append(sample_params)
-            self.individual_waveforms.append(sample_individuals)
 
-            # If this is the sample to inspect, store its individual waveforms
-            if store_sample_idx is not None and i == store_sample_idx:
-                self.stored_sample_individuals = sample_individuals
+            if(i==0):
+                #for k, h in enumerate(sample_individuals):
+                #    plt.plot(h.sample_times, h.numpy(), label=f'BBH {k+1} {sample_desired_merger_time[k]}')
+                #    plt.axvline(h.sample_times[sample_peak[k]], color='r', linestyle='--', label='Merger Peak')
+                
+                for k, h in enumerate(sample_individuals_tensor):
+                    plt.plot(sample_time[k], h.numpy(), label=f'BBH {k+1}')
+                
+                # --- Adjust time to global axis so merger is exactly at desired_merger_time ---
+                merger_idx_tensor = np.argmax(np.abs(sample_signal))
+                time_global = time - time[merger_idx_tensor] + sample_desired_merger_time[i*k]
+
+                plt.plot(sample_desired_merger_time[0], superposed_signal.numpy(), label=f'BBH {k+1}')
+            
+                plt.title(f"Time-domain waveform")    
+                plt.xlabel("Time (s)")
+                plt.ylabel("Strain")
+                plt.legend()
+                plt.grid(True)
+                plt.show()
+
+                
+                """
+                hp_tensor_len = len(sample_signal)
+                
+                hp_len = len(hp_shifted)
+
+                # Ensure slicing stays within bounds
+                start_idx = max(hp_len - hp_tensor_len, 0)
+                end_idx = start_idx + hp_tensor_len
+
+                hp_for_plot = hp_shifted[start_idx:end_idx]  # safe positive indices
+                """
+
+                # Now plot
+
+                for k, h in enumerate(sample_individuals_tensor):
+                    plt.plot(time_global, h.numpy(), label=f'BBH {k+1}')
+
+                plt.xlabel("Time [s]")
+                plt.ylabel("Amplitude")
+                plt.title(f"Sample {i}: Multi-BBH Signals")
+                plt.legend()
+                plt.grid(True)
+                plt.savefig("multi_bbh_signals.png", dpi=300, bbox_inches='tight')
+                plt.show()
+
+                plt.plot(time_global, superposed.numpy(), color='k', linestyle='--', label='Superposed signal')
+                plt.plot(time_global, sample_signal.numpy(), color='r', alpha=0.5, label='Noisy + normalized signal')
+                plt.xlabel("Time [s]")
+                plt.ylabel("Amplitude")
+                plt.title(f"Sample {i}: Multi-BBH Signals")
+                plt.legend()
+                plt.grid(True)
+                plt.savefig("noisy_normalized_signal.png", dpi=300, bbox_inches='tight')
+                plt.show()
+
+                print(f"Sample {i} BBH parameters [m1, m2, q, t0] per BBH:\n", sample_params)
+
 
         self.theta = np.array(self.theta, dtype=np.float32)  # shape: [N, K, 4]
 
@@ -355,49 +405,6 @@ class MultiBBHToyDataset(Dataset):
         theta[:, 3] = theta[:, 3] / tmax
 
         return x, torch.tensor(theta, dtype=torch.float32)
-
-
-    def plot_stored_sample(self):
-        """
-        Plot the individual BBH signals, superposed waveform, and noisy signal
-        of the stored sample, if available.
-        """
-        if self.stored_sample_individuals is None or self.stored_sample_idx is None:
-            print("No stored sample. Please pass store_sample_idx when initializing the dataset.")
-            return
-
-        idx = self.stored_sample_idx
-        sample_signal = self.signals[idx]
-        individual_signals = self.stored_sample_individuals
-        sample_params = self.theta[idx]
-
-        time = np.arange(self.signal_length) / self.fs
-        superposed_signal = torch.stack(individual_signals).sum(dim=0).numpy()
-
-        # Scale individual signals to match the noisy + normalized signal
-        scaled_individuals = [h / superposed_signal.max() * sample_signal.abs().max() for h in individual_signals]
-
-        plt.figure(figsize=(14,6))
-        for k, h in enumerate(individual_signals):
-            plt.plot(time, h.numpy(), label=f'BBH {k+1}')
-
-        plt.xlabel("Time [s]")
-        plt.ylabel("Amplitude")
-        plt.title(f"Sample {idx}: Multi-BBH Signals")
-        plt.legend()
-        plt.grid(True)
-        plt.show()
-
-        plt.plot(time, self.sample_individuals_superposed, color='k', linestyle='--', label='Superposed signal')
-        plt.plot(time, sample_signal.numpy(), color='r', alpha=0.5, label='Noisy + normalized signal')
-        plt.xlabel("Time [s]")
-        plt.ylabel("Amplitude")
-        plt.title(f"Sample {idx}: Multi-BBH Signals")
-        plt.legend()
-        plt.grid(True)
-        plt.show()
-
-        print(f"Sample {idx} BBH parameters [m1, m2, q, t0] per BBH:\n", sample_params)
 
 
 # =========================
@@ -633,8 +640,6 @@ train_ds, val_ds = torch.utils.data.random_split(ds, [train_size, val_size])
 train_loader = DataLoader(train_ds, batch_size=train_size, shuffle=True)
 val_loader   = DataLoader(val_ds,   batch_size=val_size, shuffle=False)
 
-ds.plot_stored_sample()
-
 # =========================
 # TRAINING LOOP
 # =========================
@@ -727,7 +732,8 @@ plt.plot(epochs_range, val_losses, label="Val NLL")
 plt.xlabel("Epochs"); plt.ylabel("NLL"); plt.title("Training NLL")
 plt.grid(True); plt.legend()
 plt.tight_layout()
-plt.show()
+plt.savefig("Nll.png", dpi=300, bbox_inches='tight')
+#plt.show()
 
 # -----------------------------
 # Compute confusion matrix for the last epoch
@@ -752,7 +758,9 @@ sns.heatmap(cm, annot=labels_annotation, fmt='', cmap="Blues",
 plt.xlabel("Predicted Cluster")
 plt.ylabel("True BBH")
 plt.title("Posterior-aware Confusion Matrix (Counts + Normalized)")
-plt.show()
+plt.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
+
+#plt.show()
 
 
 # =========================
@@ -838,4 +846,5 @@ for k, cluster in enumerate(clustered_np):
             ax2.axvline(true_values[j], color=color, linestyle="-", lw=1)
             ax2.axhline(true_values[i], color=color, linestyle="-", lw=1)
 
-plt.show()
+plt.savefig("corner_plot.png", dpi=300, bbox_inches='tight')
+#plt.show()
