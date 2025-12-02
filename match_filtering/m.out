@@ -1,0 +1,18 @@
+**********************************************************************
+*                         SLURM Batch System                         *
+*              IN2P3 Computing Centre, Villeurbanne FR               *
+**********************************************************************
+* Date:                 Wed May  7 05:58:46 PM CEST 2025
+* Job name:             match_filtering_run
+* Job id:               58708322
+* User:                 oelmeche
+* Account:              etgw
+* Submit host:          cca015
+* Partition:            htc
+* Quality of service:   normal
+* Nodelist:             ccwslurm0185
+* Operating System:     Red Hat Enterprise Linux release 9.5 (Plow)
+* Architecture:         x86_64
+**********************************************************************
+-------------- Running my job ----------------
+ Working dir: /pbs/home/o/oelmeche/match_filtering

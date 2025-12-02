@@ -1,0 +1,22 @@
+{
+    "approximant_td":"IMRPhenomPv2",
+    "approximant_fd":"IMRPhenomPv2",
+    "snr_threshold": 8.0,
+    "max_snr_time": null,
+    "max_snr_chunk": null,
+    "max_snr_template": null,
+    "strain_low_pass": 999,
+    "strain_high_pass": 10,
+    "resample_to_delta_t": 2048,
+    "psd_segment_length": 4,
+    "psd_low_frequency_cutoff": 20.0,
+    "match_filter_low_frequency_cutoff": 25.0,
+    "sigma_low_frequency_cutoff": 20.0,
+    "aligned_high_pass": 30.0,
+    "white_data_low_pass": 300.0,
+    "white_data_high_pass": 30.0,
+    "white_template_low_pass": 300.0,
+    "white_template_high_pass": 30.0,
+    "chisq_bins": 26,
+    "power_chisq_low_frequency_cutoff": 20.0
+}
