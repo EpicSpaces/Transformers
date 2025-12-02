@@ -235,8 +235,7 @@ class MultiBBHToyDataset(Dataset):
 
         self.signals = torch.zeros(batch_size, signal_length, dtype=torch.float32)
         self.theta = []                       # True parameters [m1, m2, q, t0] per BBH
-        self.theta = np.array(self.theta, dtype=np.float32)  # shape: [N, K, 4]
-
+        
         t_margin = 5 # extra seconds before and after all signals
         noise_std = 0.1
         target_fs = 256
@@ -254,7 +253,7 @@ class MultiBBHToyDataset(Dataset):
 
             # --- Single loop: generate, resample, shift ---
             for k in range(K):
-                desired_merger_time = desired_merger_times[i]
+                desired_merger_time = desired_merger_times[k]
 
                 m1 = np.random.uniform(100, 310)
                 m2 = np.random.uniform(5, m1)
@@ -318,7 +317,18 @@ class MultiBBHToyDataset(Dataset):
             plt.grid(True)
             plt.show()
 
-            self.signals[i] = superposed_signal
+            superposed_signal_cropped=None
+            # Crop last `signal_length` samples if too long
+            if len(superposed_signal) > signal_length:
+                superposed_signal_cropped = superposed_signal[-signal_length:]
+            # Pad zeros if too short
+            elif len(superposed_signal) < signal_length:
+                pad = signal_length - len(superposed_signal)
+                superposed_signal_cropped = torch.cat([torch.zeros(pad), superposed_signal])
+            else:
+                superposed_signal_cropped = superposed_signal
+                
+            self.signals[i] = superposed_signal_cropped
             self.theta.append(sample_params)
 
     def __len__(self):
