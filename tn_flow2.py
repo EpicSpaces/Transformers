@@ -328,7 +328,7 @@ class MultiBBHToyDataset(Dataset):
                 plt.show()
                 
             # --- Add noise and plot superposition ---
-            noisy_signal = superposed_signal + torch.randn_like(superposed_signal) * 0.2 * superposed_signal.abs().max()
+            noisy_signal = superposed_signal + torch.randn_like(superposed_signal) * 0.3 * superposed_signal.abs().max()
             if(i==0):
                 plt.plot(global_time, superposed_signal.numpy(), color='k', linewidth=2, label='Superposed')
                 plt.plot(global_time, noisy_signal.numpy(), color='r', alpha=0.5, linewidth=2, label='Superposed + noise')
