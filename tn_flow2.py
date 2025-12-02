@@ -340,18 +340,50 @@ class MultiBBHToyDataset(Dataset):
                 plt.grid(True)
                 plt.show()
 
-            superposed_signal_cropped=None
-            # Crop last `signal_length` samples if too long
-            if len(superposed_signal) > signal_length:
-                superposed_signal_cropped = superposed_signal[-signal_length:]
-            # Pad zeros if too short
-            elif len(superposed_signal) < signal_length:
-                pad = signal_length - len(superposed_signal)
-                superposed_signal_cropped = torch.cat([torch.zeros(pad), superposed_signal])
-            else:
-                superposed_signal_cropped = superposed_signal
+            
+            # Find the peak of the superposed signal
+            peak_idx = torch.argmax(torch.abs(noisy_signal))
+
+            # Compute crop indices
+            start_idx = peak_idx - signal_length // 2
+            end_idx = peak_idx + signal_length // 2
+
+            # Initialize a fixed-size tensor
+            cropped_signal = torch.zeros(signal_length, dtype=noisy_signal.dtype)
+
+            # Compute source indices (within the noisy_signal)
+            src_start = max(0, start_idx)
+            src_end   = min(len(noisy_signal), end_idx)
+
+            # Compute target indices (within cropped_signal)
+            tgt_start = max(0, -start_idx)                 # if start_idx < 0
+            tgt_end   = tgt_start + (src_end - src_start)
+
+            # Copy the relevant slice
+            cropped_signal[tgt_start:tgt_end] = noisy_signal[src_start:src_end]
+
+            # Normalize
+            final_signal = (cropped_signal - cropped_signal.mean()) / (cropped_signal.std() + 1e-8)
+
+            # Time axis for plotting
+            t_window = 10.0  # seconds
+            time_axis = np.linspace(-t_window, t_window, signal_length)
+
+            self.signals[i] = final_signal
+            
+            if(i==0):
+                tmax = 10
+                tmin = -10
+
+                plt.plot(time_axis, final_signal.numpy(), color='k', linewidth=2, label='final_signal zero mean normalisation')
                 
-            self.signals[i] = superposed_signal_cropped
+                plt.xlabel("Time [s]")
+                plt.ylabel("Amplitude")
+                plt.title("final_signal zero mean normalisation Times + Superposed Noise")
+                plt.legend()
+                plt.grid(True)
+                plt.show()
+            
             self.theta.append(sample_params)
 
     def __len__(self):
@@ -359,7 +391,7 @@ class MultiBBHToyDataset(Dataset):
 
     def __getitem__(self, idx):
         x = self.signals[idx]               # [L]
-        theta = self.theta[idx].copy()      # [K,4]  (m1, m2, q, t0)
+        theta = np.array(self.theta[idx], dtype=np.float32)   # convert list -> array      # [K,4]  (m1, m2, q, t0)
 
         # ---- Normalize parameters ----
         # masses: m1 in [100,310], m2 in [5,310]
