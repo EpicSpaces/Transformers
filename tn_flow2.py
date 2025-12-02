@@ -269,6 +269,18 @@ class MultiBBHToyDataset(Dataset):
                 # Resample
                 hp = resample_to_delta_t(hp, target_dt)
                 
+                # --- Clip waveform around its peak ---
+                peak_idx = np.argmax(np.abs(hp.numpy()))
+                window = int(20 / hp.delta_t) // 2     # 20 seconds total window (−10 to +10)
+                start = max(0, peak_idx - window)
+                end   = min(len(hp), peak_idx + window)
+                hp = hp[start:end]
+
+                if len(hp) < 2*window:
+                    pad = 2*window - len(hp)
+                    hp = TimeSeries(np.pad(hp, (0, pad)), delta_t=hp.delta_t)
+
+
                 # Shift to desired merger time
                 merger_index = np.argmax(np.abs(hp))
                 peak_time_original = hp.sample_times[merger_index]
