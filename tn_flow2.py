@@ -511,6 +511,20 @@ class BayesianTransformer(nn.Module):
         return mean, var
 
 def sample_posterior(mean, var, n_samples=100, T_obs=16.0, n_signals=3):
+    """
+    Sample from Gaussian posterior while enforcing physical constraints:
+      - mass ratio q ∈ [0,1]
+      - merger time t_merger ∈ [0, T_obs]
+
+    mean: [B, n_params]
+    var:  [B, n_params]
+    n_samples: number of draws per batch element
+    T_obs: observation duration for t_merger
+    n_signals: number of BBHs in the signal
+
+    Returns: [n_samples*B, n_params]
+    """
+    
     B, P = mean.shape
     eps = torch.randn(n_samples, B, P, device=mean.device)
 
