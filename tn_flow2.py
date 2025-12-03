@@ -325,7 +325,8 @@ class MultiBBHToyDataset(Dataset):
             if(i==0):
                 plt.legend()
                 plt.grid(True)
-                plt.show()
+                plt.savefig("Time_domain_waveforms.png", dpi=300, bbox_inches='tight')
+                #plt.show()
 
             # --- Add noise and plot superposition ---
             noisy_signal = superposed_signal + torch.randn_like(superposed_signal) * 0.3 * superposed_signal.abs().max()
@@ -338,7 +339,8 @@ class MultiBBHToyDataset(Dataset):
                 plt.title("Multiple Signals with Different Merger Times + Superposed Noise")
                 plt.legend()
                 plt.grid(True)
-                plt.show()
+                plt.savefig("Superposed_Noise.png", dpi=300, bbox_inches='tight')
+                #plt.show()
 
 
             # Find the peak of the superposed signal
@@ -382,7 +384,8 @@ class MultiBBHToyDataset(Dataset):
                 plt.title("final_signal zero mean normalisation Times + Superposed Noise")
                 plt.legend()
                 plt.grid(True)
-                plt.show()
+                plt.savefig("final_signal_norm.png", dpi=300, bbox_inches='tight')
+                #plt.show()
 
             self.theta.append(sample_params)
 
@@ -510,6 +513,9 @@ def sample_posterior(mean, var, n_samples=100, T_obs=16.0, n_signals=3, device='
     var:  [B, n_params]
     Returns: [n_samples*B, n_params]
     """
+    device = mean.device
+    var = var.to(device)
+
     B, P = mean.shape
 
     # --- Gaussian base ---
@@ -635,6 +641,8 @@ train_ds, val_ds = torch.utils.data.random_split(ds, [train_size, val_size])
 train_loader = DataLoader(train_ds, batch_size=train_size, shuffle=True)
 val_loader   = DataLoader(val_ds,   batch_size=val_size, shuffle=False)
 
+T_obs = ds.signal_length / ds.fs  # physical observation time (seconds)
+            
 # =========================
 # TRAINING LOOP
 # =========================
@@ -675,7 +683,7 @@ for epoch in range(n_epochs):
             val_running_loss += val_nll.item()
 
             samples = sample_posterior(mu, var, n_samples=n_draws,
-                                       T_obs=16, n_signals=n_signals)
+                                       T_obs=T_obs, n_signals=n_signals)
 
             # Flatten samples per BBH
             for k in range(n_signals):
@@ -767,7 +775,7 @@ theta_batch = theta_all[:batch_size].numpy()   # [B, params]
 
 with torch.no_grad():
     mean,var = model(x_obs)
-samples = sample_posterior(mean,var,n_samples=n_draws)
+samples = sample_posterior(mean,var,n_samples=n_draws, T_obs=T_obs, n_signals=n_signals)
 
 clustered,_ = cluster_posterior(samples,n_clusters=n_signals)
 
@@ -799,23 +807,22 @@ clustered_np = [
     for c in clustered_reordered
 ]
 
-# Assuming normalization: m_norm = (m - 5)/305
-m1_idx = 0  # m1 of first BBH in each cluster
-m2_idx = 1  # m2 of first BBH in each cluster
-
 # Loop over BBHs
 for k_bbh in range(n_signals):
     m1_idx = 4*k_bbh     # because labels are [m1_1, m2_1, q_1, t_1, m1_2, ...]
     m2_idx = 4*k_bbh +1
+    t_idx = 4*k_bbh + 3
 
     # Denormalize true values
     true_values[m1_idx] = true_values[m1_idx]*305 + 5
     true_values[m2_idx] = true_values[m2_idx]*305 + 5
+    true_values[t_idx] = true_values[t_idx] * T_obs
 
     # Denormalize cluster samples
     for cluster in clustered_np:
         cluster[:, m1_idx] = cluster[:, m1_idx]*305 + 5
         cluster[:, m2_idx] = cluster[:, m2_idx]*305 + 5
+        cluster[:, t_idx] = cluster[:, t_idx] * T_obs
 
 
 
