@@ -256,7 +256,7 @@ class MultiBBHToyDataset(Dataset):
                 desired_merger_time = desired_merger_times[k]
 
                 m1 = np.random.uniform(5, 305)
-                m2 = np.random.uniform(5, 305)
+                m2 = np.random.uniform(5, m1)  # m2 ≤ m1
                 q = m2 / m1
                 t0 = np.random.uniform(0, signal_length / fs)
                 sample_params.append([m1, m2, q, t0])
