@@ -495,63 +495,45 @@ class BayesianTransformer(nn.Module):
         # pool over patches
         h_mean = h.mean(dim=1)                   # [B, d_model]
 
-        mean_raw = self.mean_head(h_mean)    # [B, n_params]
-        # ---- Constrain masses to [0,1] ----
-        mean = mean_raw.clone()
-        # constrain every BBH mass
-        for k in range(3):
-            m1 = 4*k
-            m2 = 4*k + 1
-            mean[:, m1] = torch.sigmoid(mean_raw[:, m1])
-            mean[:, m2] = torch.sigmoid(mean_raw[:, m2])
-
+        mean = self.mean_head(h_mean)            # [B, n_params]
         logvar = self.logvar_head(h_mean)        # [B, n_params]
         var = F.softplus(logvar) + 1e-6          # ensure positivity and numerical stability
 
         return mean, var
 
-def sample_posterior(mean, var, n_samples=100, T_obs=16.0, n_signals=3):
+def sample_posterior(mean, var, n_samples=100, T_obs=16.0, n_signals=3, device='cpu'):
     """
-    Sample from Gaussian posterior while enforcing physical constraints:
-      - mass ratio q ∈ [0,1]
-      - merger time t_merger ∈ [0, T_obs]
-
+    Vectorized truncated Gaussian sampling:
+      - m1, m2, q ∈ [0,1] (normalized)
+      - t ∈ [0, T_obs]
     mean: [B, n_params]
     var:  [B, n_params]
-    n_samples: number of draws per batch element
-    T_obs: observation duration for t_merger
-    n_signals: number of BBHs in the signal
-
     Returns: [n_samples*B, n_params]
     """
-    
     B, P = mean.shape
-    eps = torch.randn(n_samples, B, P, device=mean.device)
 
-    # ensure q/t positive if you wish (you already did softplus earlier — optional)
-    mean_proc = mean.clone()
+    # --- Gaussian base ---
+    eps = torch.randn(n_samples, B, P, device=device)
+    std = torch.sqrt(var).unsqueeze(0)         # [1, B, P]
+    mean_unsq = mean.unsqueeze(0)             # [1, B, P]
+    raw_samples = mean_unsq + eps * std       # [n_samples, B, P]
 
-    # sample (Gaussian)
-    samples = mean_proc.unsqueeze(0) + eps * torch.sqrt(var).unsqueeze(0)  # [n_samples, B, P]
-    samples = samples.reshape(-1, P)  # [n_samples*B, P]
-
-    # ----- CLAMP to physical normalized ranges -----
-    # mass indices -> clamp to [0,1]
+    # --- Apply sigmoid to m1, m2, q to keep [0,1] ---
     for k in range(n_signals):
         m1_idx = 4*k
         m2_idx = 4*k + 1
         q_idx  = 4*k + 2
         t_idx  = 4*k + 3
 
-        samples[:, m1_idx] = torch.clamp(samples[:, m1_idx], 0.0, 1.0)
-        samples[:, m2_idx] = torch.clamp(samples[:, m2_idx], 0.0, 1.0)
+        raw_samples[:, :, m1_idx] = torch.sigmoid(raw_samples[:, :, m1_idx])
+        raw_samples[:, :, m2_idx] = torch.sigmoid(raw_samples[:, :, m2_idx])
+        raw_samples[:, :, q_idx]  = torch.sigmoid(raw_samples[:, :, q_idx])
 
-        # q in [0,1]
-        samples[:, q_idx] = torch.clamp(samples[:, q_idx], 0.0, 1.0)
         # t in [0, T_obs]
-        samples[:, t_idx] = torch.clamp(samples[:, t_idx], 0.0, T_obs)
+        raw_samples[:, :, t_idx] = torch.sigmoid(raw_samples[:, :, t_idx]) * T_obs
 
-    return samples.cpu().numpy()
+    return raw_samples.reshape(-1, P).cpu().numpy()
+
 
 # =========================
 # 3 Spectral clustering
