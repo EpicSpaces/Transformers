@@ -258,7 +258,7 @@ class MultiBBHToyDataset(Dataset):
                 m1 = np.random.uniform(5, 305)
                 m2 = np.random.uniform(5, m1)  # m2 ≤ m1
                 q = m2 / m1
-                t0 = np.random.uniform(0, signal_length / fs)
+                t0 = desired_merger_time#np.random.uniform(0, signal_length / fs)
                 sample_params.append([m1, m2, q, t0])
 
                 # Generate waveform
@@ -405,8 +405,8 @@ class MultiBBHToyDataset(Dataset):
         theta[:, 2] = theta[:, 2]
 
         # merger time t0 ∈ [0, T_obs = signal_length/fs]
-        tmax = self.signal_length / self.fs
-        theta[:, 3] = theta[:, 3] / tmax
+        t_window = 10.0
+        theta[:, 3] = (theta[:, 3] + t_window) / (2 * t_window)
 
         return x, torch.tensor(theta, dtype=torch.float32)
 
@@ -504,41 +504,40 @@ class BayesianTransformer(nn.Module):
 
         return mean, var
 
-def sample_posterior(mean, var, n_samples=100, T_obs=16.0, n_signals=3, device='cpu'):
+def sample_posterior(mean, var, n_samples=200, n_signals=3):
     """
-    Vectorized truncated Gaussian sampling:
-      - m1, m2, q ∈ [0,1] (normalized)
-      - t ∈ [0, T_obs]
+    Vectorized posterior sampling.
+    All parameters are normalized to [0,1] in the model space.
+    Denormalize later if needed (masses, time, etc.).
+    
     mean: [B, n_params]
     var:  [B, n_params]
-    Returns: [n_samples*B, n_params]
+    Returns: [n_samples*B, n_params] numpy array
     """
     device = mean.device
     var = var.to(device)
-
+    
     B, P = mean.shape
-
-    # --- Gaussian base ---
+    
+    # Gaussian samples
     eps = torch.randn(n_samples, B, P, device=device)
-    std = torch.sqrt(var).unsqueeze(0)         # [1, B, P]
-    mean_unsq = mean.unsqueeze(0)             # [1, B, P]
-    raw_samples = mean_unsq + eps * std       # [n_samples, B, P]
-
-    # --- Apply sigmoid to m1, m2, q to keep [0,1] ---
+    std = torch.sqrt(var).unsqueeze(0)      # [1, B, P]
+    samples = mean.unsqueeze(0) + eps * std # [n_samples, B, P]
+    
+    # Sigmoid to constrain all parameters to [0,1]
     for k in range(n_signals):
         m1_idx = 4*k
         m2_idx = 4*k + 1
         q_idx  = 4*k + 2
         t_idx  = 4*k + 3
 
-        raw_samples[:, :, m1_idx] = torch.sigmoid(raw_samples[:, :, m1_idx])
-        raw_samples[:, :, m2_idx] = torch.sigmoid(raw_samples[:, :, m2_idx])
-        raw_samples[:, :, q_idx]  = torch.sigmoid(raw_samples[:, :, q_idx])
+        samples[:, :, m1_idx] = torch.sigmoid(samples[:, :, m1_idx])
+        samples[:, :, m2_idx] = torch.sigmoid(samples[:, :, m2_idx])
+        samples[:, :, q_idx]  = torch.sigmoid(samples[:, :, q_idx])
+        samples[:, :, t_idx]  = torch.sigmoid(samples[:, :, t_idx])  # t ∈ [0,1]
 
-        # t in [0, T_obs]
-        raw_samples[:, :, t_idx] = torch.sigmoid(raw_samples[:, :, t_idx]) * T_obs
+    return samples.reshape(-1, P).cpu().numpy()
 
-    return raw_samples.reshape(-1, P).cpu().numpy()
 
 
 # =========================
@@ -640,9 +639,7 @@ print("train_size :", train_size)
 train_ds, val_ds = torch.utils.data.random_split(ds, [train_size, val_size])
 train_loader = DataLoader(train_ds, batch_size=train_size, shuffle=True)
 val_loader   = DataLoader(val_ds,   batch_size=val_size, shuffle=False)
-
-T_obs = ds.signal_length / ds.fs  # physical observation time (seconds)
-            
+       
 # =========================
 # TRAINING LOOP
 # =========================
@@ -682,8 +679,7 @@ for epoch in range(n_epochs):
 
             val_running_loss += val_nll.item()
 
-            samples = sample_posterior(mu, var, n_samples=n_draws,
-                                       T_obs=T_obs, n_signals=n_signals)
+            samples = sample_posterior(mu, var, n_samples=n_draws, n_signals=n_signals)
 
             # Flatten samples per BBH
             for k in range(n_signals):
@@ -775,7 +771,7 @@ theta_batch = theta_all[:batch_size].numpy()   # [B, params]
 
 with torch.no_grad():
     mean,var = model(x_obs)
-samples = sample_posterior(mean,var,n_samples=n_draws, T_obs=T_obs, n_signals=n_signals)
+samples = sample_posterior(mean,var,n_samples=n_draws, n_signals=n_signals)
 
 clustered,_ = cluster_posterior(samples,n_clusters=n_signals)
 
@@ -816,13 +812,15 @@ for k_bbh in range(n_signals):
     # Denormalize true values
     true_values[m1_idx] = true_values[m1_idx]*305 + 5
     true_values[m2_idx] = true_values[m2_idx]*305 + 5
-    true_values[t_idx] = true_values[t_idx] * T_obs
+    t_window = 10.0
+    true_values[t_idx] = true_values[t_idx] * (2*t_window) - t_window
+
 
     # Denormalize cluster samples
     for cluster in clustered_np:
         cluster[:, m1_idx] = cluster[:, m1_idx]*305 + 5
         cluster[:, m2_idx] = cluster[:, m2_idx]*305 + 5
-        cluster[:, t_idx] = cluster[:, t_idx] * T_obs
+        cluster[:, t_idx] = cluster[:, t_idx] * (2*t_window) - t_window
 
 
 
