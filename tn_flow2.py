@@ -504,39 +504,39 @@ class BayesianTransformer(nn.Module):
 
         return mean, var
 
-def sample_posterior(mean, var, n_samples=200, n_signals=3):
+def sample_posterior(mean, var, n_samples=100, n_signals=3):
     """
-    Vectorized posterior sampling.
-    All parameters are normalized to [0,1] in the model space.
-    Denormalize later if needed (masses, time, etc.).
-    
+    Sample from Gaussian posterior while enforcing physical constraints:
+      - mass ratio q ∈ [0,1]
+      - merger time t_merger ∈ [0, T_obs]
+
     mean: [B, n_params]
     var:  [B, n_params]
-    Returns: [n_samples*B, n_params] numpy array
+    n_samples: number of draws per batch element
+    T_obs: observation duration for t_merger
+    n_signals: number of BBHs in the signal
+
+    Returns: [n_samples*B, n_params]
     """
-    device = mean.device
-    var = var.to(device)
-    
     B, P = mean.shape
-    
-    # Gaussian samples
-    eps = torch.randn(n_samples, B, P, device=device)
-    std = torch.sqrt(var).unsqueeze(0)      # [1, B, P]
-    samples = mean.unsqueeze(0) + eps * std # [n_samples, B, P]
-    
-    # Sigmoid to constrain all parameters to [0,1]
+    eps = torch.randn(n_samples, B, P, device=mean.device)
+
+    # Sample
+    samples = mean.unsqueeze(0) + eps * torch.sqrt(var).unsqueeze(0)
+    samples = samples.reshape(-1, P)
+
+    # Clamp to physical ranges
     for k in range(n_signals):
-        m1_idx = 4*k
-        m2_idx = 4*k + 1
-        q_idx  = 4*k + 2
-        t_idx  = 4*k + 3
+        m1_idx = k*4
+        m2_idx = k*4 + 1
+        q_idx = k*4 + 2
+        t_idx = k*4 + 3
+        samples[:, m1_idx] = torch.clamp(samples[:, m1_idx], 0.0, 305.0)
+        samples[:, m2_idx] = torch.clamp(samples[:, m2_idx], 0.0, 305.0)
+        #samples[:, q_idx] = torch.clamp(samples[:, q_idx], 0.0, 1.0)
+        #samples[:, t_idx] = torch.clamp(samples[:, t_idx], 0.0, T_obs)
 
-        samples[:, :, m1_idx] = torch.sigmoid(samples[:, :, m1_idx])
-        samples[:, :, m2_idx] = torch.sigmoid(samples[:, :, m2_idx])
-        samples[:, :, q_idx]  = torch.sigmoid(samples[:, :, q_idx])
-        samples[:, :, t_idx]  = torch.sigmoid(samples[:, :, t_idx])  # t ∈ [0,1]
-
-    return samples.reshape(-1, P).cpu().numpy()
+    return samples.cpu().numpy()
 
 
 
@@ -598,7 +598,7 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 signal_length = 2048
 batch_size    = 10
-n_epochs      = 10
+n_epochs      = 300
 n_signals     = 3
 n_params      = n_signals * 4
 n_draws=50
