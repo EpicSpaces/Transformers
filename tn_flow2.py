@@ -801,8 +801,8 @@ clustered_np = [
 for k_bbh in range(n_signals):
     m1_idx = 4*k_bbh     # because labels are [m1_1, m2_1, q_1, t_1, m1_2, ...]
     m2_idx = 4*k_bbh +1
-    t_idx = 4*k_bbh + 2
-    q_idx = 4*k_bbh + 3
+    q_idx = 4*k_bbh + 2
+    t_idx = 4*k_bbh + 3
 
     # Denormalize true values
     true_values[m1_idx] = true_values[m1_idx]*305 + 5
