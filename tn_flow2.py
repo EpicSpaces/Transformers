@@ -593,7 +593,7 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 signal_length = 1024
 batch_size    = 10
-n_epochs      = 100
+n_epochs      = 10
 n_signals     = 3
 n_params      = n_signals * 4
 n_draws=50
@@ -773,13 +773,26 @@ clustered,_ = cluster_posterior(samples,n_clusters=n_signals)
 
 # Hungarian reorder
 reference_samples_per_signal = get_reference_samples(theta_all, n_batch_size=batch_size, n_signals=n_signals)
+
 clustered_reordered = reorder_clusters_to_reference(clustered, reference_samples_per_signal)
 
-true_values = []
-for ref in reference_samples_per_signal:
-    med_ref = np.median(ref, axis=0)
-    true_values.append(med_ref)
-true_values = np.concatenate(true_values) # shape [n_params]
+true_values = np.zeros((n_signals, 4))
+for k in range(n_signals):
+    # ref contains all BBHs; slice the columns for BBH k
+    ref_k = reference_samples_per_signal[k][:, k*4:(k+1)*4]  # shape [B, 4]
+    true_values[k] = np.median(ref_k, axis=0)
+
+print(true_values.shape)  # (3, 4)
+
+true_values = np.zeros_like(true_values)
+for k_bbh in range(n_signals):
+    m1_norm, m2_norm, q_norm, t_norm = true_values[k_bbh]
+
+    m1 = m1_norm * 205 + 100
+    m2 = m2_norm * (m1 - 5) + 5
+    t  = t_norm * (2*t_window) - t_window
+
+    true_values[k_bbh] = [m1, m2, q_norm, t]
 
 # =========================
 # 7 Corner Plot
@@ -806,22 +819,19 @@ for k_bbh in range(n_signals):
     t_idx = 4*k_bbh + 3
     q_idx = 4*k_bbh + 2
 
-    # Denormalize true values
-    true_values[m1_idx] = true_values[m1_idx]*305 + 100
-    true_values[m2_idx] = true_values[m2_idx]*(true_values[m1_idx]- 5) + 5
-
-    print(true_values[m1_idx])
-
-    true_values[t_idx] = true_values[t_idx] * (2*t_window) - t_window
-
-
     # Denormalize cluster samples
     for cluster in clustered_np:        
-        cluster[:, m1_idx] = cluster[:, m1_idx]*305 + 100
-        cluster[:, m2_idx] = cluster[:, m2_idx]*(cluster[:, m1_idx]- 5) + 5
+        # Denormalize m1
 
-        cluster[:, m1_idx] = np.clip(cluster[:, m1_idx], 100, 310)
-        cluster[:, m2_idx] = np.clip(cluster[:, m2_idx], 5, 310)
+        m1_norm = cluster[:, m1_idx].copy()
+        m1 = m1_norm * 205 + 100
+        cluster[:, m1_idx] = m1
+
+        # Denormalize m2 relative to denormalized m1
+        cluster[:, m2_idx] = cluster[:, m2_idx] * (m1 - 5) + 5
+
+        #cluster[:, m1_idx] = np.clip(cluster[:, m1_idx], 100, 310)
+        #cluster[:, m2_idx] = np.clip(cluster[:, m2_idx], 5, 310)
         
         cluster[:, t_idx] = cluster[:, t_idx] * (2*t_window) - t_window
 
@@ -851,6 +861,10 @@ for k in range(1, len(clustered_np)):
 n_params = clustered_np[0].shape[1]
 # overlay medians/stds
 axes = np.array(fig.axes).reshape((n_params, n_params))
+
+print("true_values min/max before denorm:", np.min(true_values), np.max(true_values))
+# denorm_true_values shape: (3, 4)
+true_values = true_values.flatten()  # shape (12,)
 
 for k, cluster in enumerate(clustered_np):
 
