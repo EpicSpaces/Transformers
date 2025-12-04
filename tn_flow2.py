@@ -801,7 +801,8 @@ clustered_np = [
 for k_bbh in range(n_signals):
     m1_idx = 4*k_bbh     # because labels are [m1_1, m2_1, q_1, t_1, m1_2, ...]
     m2_idx = 4*k_bbh +1
-    t_idx = 4*k_bbh + 3
+    t_idx = 4*k_bbh + 2
+    q_idx = 4*k_bbh + 3
 
     # Denormalize true values
     true_values[m1_idx] = true_values[m1_idx]*305 + 5
@@ -814,10 +815,12 @@ for k_bbh in range(n_signals):
         cluster[:, m1_idx] = cluster[:, m1_idx]*305 + 5
         cluster[:, m2_idx] = cluster[:, m2_idx]*305 + 5
         
-        cluster[:, m1_idx] = torch.clamp(cluster[:, m1_idx], min=5, max=310)
-        cluster[:, m2_idx] = torch.clamp(cluster[:, m2_idx], min=5, max=310)
+        cluster[:, m1_idx] = np.clip(cluster[:, m1_idx], 5, 310)
+        cluster[:, m2_idx] = np.clip(cluster[:, m2_idx], 5, 310)
         
         cluster[:, t_idx] = cluster[:, t_idx] * (2*t_window) - t_window
+
+        cluster[:, q_idx] = np.clip(cluster[:, q_idx], 0, 1.)
 
 
 
