@@ -219,6 +219,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pycbc.waveform import get_td_waveform
 
+t_window = 1.0  # seconds
+
 class MultiBBHToyDataset(Dataset):
     def __init__(self, batch_size=100, signal_length=2048, K=3, fs=2048,
                  f_lower=5, seed=42):
@@ -249,13 +251,13 @@ class MultiBBHToyDataset(Dataset):
             start_times = []
             end_times = []
 
-            desired_merger_times = np.random.uniform(-10.9, 10.9, size=K)
+            desired_merger_times = np.random.uniform(-1.0, 1.0, size=K)
 
             # --- Single loop: generate, resample, shift ---
             for k in range(K):
                 desired_merger_time = desired_merger_times[k]
 
-                m1 = np.random.uniform(5, 305)
+                m1 = np.random.uniform(100, 305)
                 m2 = np.random.uniform(5, m1)  # m2 ≤ m1
                 q = m2 / m1
                 t0 = desired_merger_time#np.random.uniform(0, signal_length / fs)
@@ -269,9 +271,10 @@ class MultiBBHToyDataset(Dataset):
                 # Resample
                 hp = resample_to_delta_t(hp, target_dt)
 
+                """
                 # --- Clip waveform around its peak ---
                 peak_idx = np.argmax(np.abs(hp.numpy()))
-                window = int(20 / hp.delta_t) // 2     # 20 seconds total window (−10 to +10)
+                window = int(t_window / hp.delta_t) // 2     # 20 seconds total window (-10 to +10)
                 start = max(0, peak_idx - window)
                 end   = min(len(hp), peak_idx + window)
                 hp = hp[start:end]
@@ -279,7 +282,7 @@ class MultiBBHToyDataset(Dataset):
                 if len(hp) < 2*window:
                     pad = 2*window - len(hp)
                     hp = TimeSeries(np.pad(hp, (0, pad)), delta_t=hp.delta_t)
-
+                """
 
                 # Shift to desired merger time
                 merger_index = np.argmax(np.abs(hp))
@@ -316,6 +319,7 @@ class MultiBBHToyDataset(Dataset):
                 if(i==0):
                     plt.plot(hp_shifted.sample_times, template_tensor.numpy(),
                             label=f'Signal {j+1}, merger {desired_merger_times[j]:.2f}s')
+                    plt.xlim(-t_window, t_window)
                     plt.xlabel("Time [s]")
                     plt.ylabel("Amplitude")
                     plt.title(f"Time-domain waveform")
@@ -326,7 +330,7 @@ class MultiBBHToyDataset(Dataset):
                 plt.legend()
                 plt.grid(True)
                 plt.savefig("Time_domain_waveforms.png", dpi=300, bbox_inches='tight')
-                #plt.show()
+                plt.show()
 
             # --- Add noise and plot superposition ---
             noisy_signal = superposed_signal + torch.randn_like(superposed_signal) * 0.3 * superposed_signal.abs().max()
@@ -334,13 +338,14 @@ class MultiBBHToyDataset(Dataset):
                 plt.plot(global_time, superposed_signal.numpy(), color='k', linewidth=2, label='Superposed')
                 plt.plot(global_time, noisy_signal.numpy(), color='r', alpha=0.5, linewidth=2, label='Superposed + noise')
 
+                plt.xlim(-t_window, t_window)
                 plt.xlabel("Time [s]")
                 plt.ylabel("Amplitude")
                 plt.title("Multiple Signals with Different Merger Times + Superposed Noise")
                 plt.legend()
                 plt.grid(True)
                 plt.savefig("Superposed_Noise.png", dpi=300, bbox_inches='tight')
-                #plt.show()
+                plt.show()
 
 
             # Find the peak of the superposed signal
@@ -365,20 +370,19 @@ class MultiBBHToyDataset(Dataset):
             cropped_signal[tgt_start:tgt_end] = noisy_signal[src_start:src_end]
 
             # Normalize
-            final_signal = (cropped_signal - cropped_signal.mean()) / (cropped_signal.std() + 1e-8)
+            #final_signal = (cropped_signal - cropped_signal.mean()) / (cropped_signal.std() + 1e-8)
 
             # Time axis for plotting
-            t_window = 10.0  # seconds
             time_axis = np.linspace(-t_window, t_window, signal_length)
 
-            self.signals[i] = final_signal
+            self.signals[i] = cropped_signal
+            #self.signals[i] = final_signal
 
             if(i==0):
-                tmax = 10
-                tmin = -10
+                plt.plot(time_axis, cropped_signal.numpy(), color='k', linewidth=2, label='final_signal zero mean normalisation')
+                #plt.plot(time_axis, final_signal.numpy(), color='k', linewidth=2, label='final_signal zero mean normalisation')
 
-                plt.plot(time_axis, final_signal.numpy(), color='k', linewidth=2, label='final_signal zero mean normalisation')
-
+                plt.xlim(-t_window, t_window)
                 plt.xlabel("Time [s]")
                 plt.ylabel("Amplitude")
                 plt.title("final_signal zero mean normalisation Times + Superposed Noise")
@@ -405,7 +409,6 @@ class MultiBBHToyDataset(Dataset):
         theta[:, 2] = theta[:, 2]
 
         # merger time t0 ∈ [0, T_obs = signal_length/fs]
-        t_window = 10.0
         theta[:, 3] = (theta[:, 3] + t_window) / (2 * t_window)
 
         return x, torch.tensor(theta, dtype=torch.float32)
@@ -524,17 +527,6 @@ def sample_posterior(mean, var, n_samples=100, n_signals=3):
     # Sample
     samples = mean.unsqueeze(0) + eps * torch.sqrt(var).unsqueeze(0)
     samples = samples.reshape(-1, P)
-
-    # Clamp to physical ranges
-    for k in range(n_signals):
-        m1_idx = k*4
-        m2_idx = k*4 + 1
-        q_idx = k*4 + 2
-        t_idx = k*4 + 3
-        samples[:, m1_idx] = torch.clamp(samples[:, m1_idx], 0.0, 305.0)
-        samples[:, m2_idx] = torch.clamp(samples[:, m2_idx], 0.0, 305.0)
-        #samples[:, q_idx] = torch.clamp(samples[:, q_idx], 0.0, 1.0)
-        #samples[:, t_idx] = torch.clamp(samples[:, t_idx], 0.0, T_obs)
 
     return samples.cpu().numpy()
 
@@ -761,6 +753,7 @@ plt.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
 
 #plt.show()
 
+n_draws=5000
 
 # =========================
 # 6 Posterior & Clustering
@@ -812,7 +805,6 @@ for k_bbh in range(n_signals):
     # Denormalize true values
     true_values[m1_idx] = true_values[m1_idx]*305 + 5
     true_values[m2_idx] = true_values[m2_idx]*305 + 5
-    t_window = 10.0
     true_values[t_idx] = true_values[t_idx] * (2*t_window) - t_window
 
 
@@ -820,6 +812,10 @@ for k_bbh in range(n_signals):
     for cluster in clustered_np:
         cluster[:, m1_idx] = cluster[:, m1_idx]*305 + 5
         cluster[:, m2_idx] = cluster[:, m2_idx]*305 + 5
+        
+        cluster[:, m1_idx] = torch.clamp(cluster[:, m1_idx], min=5, max=310)
+        cluster[:, m2_idx] = torch.clamp(cluster[:, m2_idx], min=5, max=310)
+        
         cluster[:, t_idx] = cluster[:, t_idx] * (2*t_window) - t_window
 
 
