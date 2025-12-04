@@ -835,7 +835,7 @@ for k_bbh in range(n_signals):
         
         cluster[:, t_idx] = cluster[:, t_idx] * (2*t_window) - t_window
 
-        cluster[:, q_idx] = np.clip(cluster[:, q_idx], 0, 1.)
+        #cluster[:, q_idx] = np.clip(cluster[:, q_idx], 0, 1.)
 
 
 
