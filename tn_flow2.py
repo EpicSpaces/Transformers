@@ -543,7 +543,8 @@ def cluster_posterior(samples, n_clusters=2):
     clustering = SpectralClustering(n_clusters=n_clusters,
                                     affinity='nearest_neighbors',
                                     assign_labels='kmeans',
-                                    random_state=42)
+                                    random_state=42,
+                                    n_jobs=-1)
     labels = clustering.fit_predict(samples)
     clustered = [samples[labels == k] for k in range(n_clusters)]
     return clustered, labels
@@ -753,7 +754,7 @@ plt.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
 
 #plt.show()
 
-n_draws=10000
+n_draws=5000
 
 # =========================
 # 6 Posterior & Clustering
