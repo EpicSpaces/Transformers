@@ -336,7 +336,7 @@ class MultiBBHToyDataset(Dataset):
             noisy_signal = superposed_signal + torch.randn_like(superposed_signal) * 0.3 * superposed_signal.abs().max()
             if(i==0):
                 plt.plot(global_time, superposed_signal.numpy(), color='k', linewidth=2, label='Superposed')
-                plt.plot(global_time, noisy_signal.numpy(), color='r', alpha=0.5, linewidth=2, label='Superposed + noise')
+                #plt.plot(global_time, noisy_signal.numpy(), color='r', alpha=0.5, linewidth=2, label='Superposed + noise')
 
                 plt.xlim(-t_window, t_window)
                 plt.xlabel("Time [s]")
@@ -350,7 +350,7 @@ class MultiBBHToyDataset(Dataset):
 
             # Find the peak of the superposed signal
             peak_idx = torch.argmax(torch.abs(noisy_signal))
-
+            
             # Compute crop indices
             start_idx = peak_idx - signal_length // 2
             end_idx = peak_idx + signal_length // 2
@@ -590,10 +590,10 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 signal_length = 2048
 batch_size    = 10
-n_epochs      = 300
+n_epochs      = 150
 n_signals     = 3
 n_params      = n_signals * 4
-n_draws=50
+n_draws=100
 
 ds = MultiBBHToyDataset(batch_size=batch_size,
                         signal_length=signal_length,
@@ -753,7 +753,7 @@ plt.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
 
 #plt.show()
 
-n_draws=5000
+n_draws=10000
 
 # =========================
 # 6 Posterior & Clustering
