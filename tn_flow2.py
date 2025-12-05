@@ -221,44 +221,6 @@ from pycbc.waveform import get_td_waveform
 
 t_window = 1.0  # seconds
 
-import numpy as np
-
-def normalize_minmax(arr, data_min=None, data_max=None, feature_range=(0, 1)):
-    """
-    Normalize array to a given range [a,b] (default [0,1]) using min-max scaling.
-    
-    arr: np.ndarray of shape [n_samples, n_features]
-    data_min, data_max: optional, min and max per feature (for consistent scaling)
-    feature_range: tuple (min, max) of target range
-    
-    Returns:
-        normalized array, data_min, data_max
-    """
-    a, b = feature_range
-    
-    if data_min is None:
-        data_min = np.min(arr, axis=0)
-    if data_max is None:
-        data_max = np.max(arr, axis=0)
-    
-    scale = (b - a) / (data_max - data_min + 1e-12)  # add epsilon to avoid div by 0
-    arr_norm = a + (arr - data_min) * scale
-    
-    return arr_norm, data_min, data_max
-
-def denormalize_minmax(arr_norm, data_min, data_max, feature_range=(0, 1)):
-    """
-    Denormalize array from a given range [a,b] back to original scale.
-    
-    arr_norm: normalized array
-    data_min, data_max: min and max per feature
-    feature_range: tuple (min, max) used in normalization
-    """
-    a, b = feature_range
-    scale = (data_max - data_min) / (b - a + 1e-12)
-    arr = data_min + (arr_norm - a) * scale
-    return arr
-
 class MultiBBHToyDataset(Dataset):
     def __init__(self, batch_size=100, signal_length=2048, K=3, fs=2048,
                  f_lower=5, seed=42):
@@ -296,7 +258,7 @@ class MultiBBHToyDataset(Dataset):
                 desired_merger_time = desired_merger_times[k]
 
                 m1 = np.random.uniform(100, 305)
-                m2 = np.random.uniform(80, m1)  # m2 ≤ m1
+                m2 = np.random.uniform(5, m1)  # m2 ≤ m1
                 q = m2 / m1
                 t0 = desired_merger_time#np.random.uniform(0, signal_length / fs)
                 sample_params.append([m1, m2, q, t0])
@@ -388,7 +350,7 @@ class MultiBBHToyDataset(Dataset):
 
             # Find the peak of the superposed signal
             peak_idx = torch.argmax(torch.abs(noisy_signal))
-            
+
             # Compute crop indices
             start_idx = peak_idx - signal_length // 2
             end_idx = peak_idx + signal_length // 2
@@ -435,26 +397,23 @@ class MultiBBHToyDataset(Dataset):
         return self.batch_size
 
     def __getitem__(self, idx):
-        x = self.signals[idx]  # [L]
-        theta = np.array(self.theta[idx], dtype=np.float32)  # [K,4] (m1, m2, q, t0)
+        x = self.signals[idx]               # [L]
+        theta = np.array(self.theta[idx], dtype=np.float32)   # convert list -> array      # [K,4]  (m1, m2, q, t0)
 
         # ---- Normalize parameters ----
-        # 1) m1 ∈ [100, 305]
-        theta[:, 0], m1_min, m1_max = normalize_minmax(theta[:, 0], feature_range=(0, 1))
+        # masses: m1 in [100,310], m2 in [5,310]
+        theta[:, 0] = (theta[:, 0] - 100) / (305 - 100)  # m1_norm ∈ [0,1]
+        m1_orig = theta[:,0]*205 + 100  # denormalize m1 to original
+        theta[:,1] = (theta[:,1] - 5) / (m1_orig - 5)  # scale m2 relative to its min and max
 
-        # 2) m2 ∈ [5, m1] → scale relative to its min (5) and dynamic max (m1)
-        # Note: we normalize m2 per sample relative to its corresponding m1
-        theta[:, 1] = (theta[:, 1] - 80) / (theta[:, 0] * (m1_max - m1_min) + m1_min - 80)
 
-        # 3) mass ratio q ∈ [0,1] → already in range, no normalization needed
-        # but for consistency, you can still call normalize_minmax
-        #theta[:, 2], q_min, q_max = normalize_minmax(theta[:, 2], feature_range=(0, 1))
+        # mass ratio q already in [0,1] → no change
+        theta[:, 2] = theta[:, 2]
 
-        # 4) merger time t0 ∈ [-t_window, t_window]
-        theta[:, 3], t_min, t_max = normalize_minmax(theta[:, 3], feature_range=(-t_window, t_window))
+        # merger time t0 ∈ [0, T_obs = signal_length/fs]
+        theta[:, 3] = (theta[:, 3] + t_window) / (2 * t_window)
 
         return x, torch.tensor(theta, dtype=torch.float32)
-
 
 
 # =========================
@@ -675,7 +634,7 @@ print("train_size :", train_size)
 train_ds, val_ds = torch.utils.data.random_split(ds, [train_size, val_size])
 train_loader = DataLoader(train_ds, batch_size=train_size, shuffle=True)
 val_loader   = DataLoader(val_ds,   batch_size=val_size, shuffle=False)
-       
+
 # =========================
 # TRAINING LOOP
 # =========================
@@ -797,7 +756,7 @@ plt.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
 
 #plt.show()
 
-n_draws=50
+n_draws=500
 
 # =========================
 # 6 Posterior & Clustering
@@ -817,95 +776,93 @@ reference_samples_per_signal = get_reference_samples(theta_all, n_batch_size=bat
 
 clustered_reordered = reorder_clusters_to_reference(clustered, reference_samples_per_signal)
 
-true_values = np.zeros((n_signals, 4))
-for k in range(n_signals):
-    # ref contains all BBHs; slice the columns for BBH k
-    ref_k = reference_samples_per_signal[k][:, k*4:(k+1)*4]  # shape [B, 4]
-    true_values[k] = np.median(ref_k, axis=0)
+import numpy as np
+import corner
+import matplotlib.pyplot as plt
 
-print(true_values.shape)  # (3, 4)
-
-true_values = np.zeros_like(true_values)
-for k_bbh in range(n_signals):
-    m1_norm, m2_norm, q_norm, t_norm = true_values[k_bbh]
-
-    # Denormalize using min/max ranges
-    m1 = denormalize_minmax(m1_norm, 100, 305)  # m1 ∈ [100,305]
-    m2 = denormalize_minmax(m2_norm, 80, m1)     # m2 ∈ [5, m1]
-    #q  = denormalize_minmax(q_norm, 0, 1)       # q ∈ [0,1]
-    t  = denormalize_minmax(t_norm, -t_window, t_window)  # t ∈ [-t_window, t_window]
-
-    true_values[k_bbh] = [m1, m2, q_norm, t]
 
 # =========================
-# 7 Corner Plot
+# 1. Prepare labels and colors
 # =========================
 param_names = ["m1", "m2", "q", "t"]
 labels_names = []
-
-for k in range(n_signals):  # loop over each BBH
+for k in range(n_signals):
     for pname in param_names:
         labels_names.append(f"{pname}_{k+1}")
 
 colors = ["red", "blue", "green", "orange", "purple"]
 
-# convert to numpy
+# =========================
+# 2. Convert clusters to numpy
+# =========================
 clustered_np = [
     c if isinstance(c, np.ndarray) else c.detach().numpy()
     for c in clustered_reordered
 ]
+true_values_for_plot = np.zeros_like(clustered_np[0].mean(axis=0))  # shape [n_signals*4]
 
-# Loop over BBHs
 for k_bbh in range(n_signals):
-    m1_idx = 4*k_bbh     # because labels are [m1_1, m2_1, q_1, t_1, m1_2, ...]
-    m2_idx = 4*k_bbh +1
-    q_idx = 4*k_bbh + 2
-    t_idx = 4*k_bbh + 3
-    
-    # Denormalize cluster samples
-    for cluster in clustered_np:        
+    m1_idx = 4*k_bbh
+    m2_idx = 4*k_bbh+1
+    q_idx  = 4*k_bbh+2
+    t_idx  = 4*k_bbh+3
+
+    # Compute median per column from cluster (or reference samples)
+    true_values_for_plot[m1_idx] = np.median(clustered_np[0][:, m1_idx])
+    true_values_for_plot[m2_idx] = np.median(clustered_np[0][:, m2_idx])
+    true_values_for_plot[q_idx]  = np.median(clustered_np[0][:, q_idx])
+    true_values_for_plot[t_idx]  = np.median(clustered_np[0][:, t_idx])
+
+# =========================
+# 3. Denormalize cluster samples
+# =========================
+for k_bbh in range(n_signals):
+    m1_idx = 4*k_bbh
+    m2_idx = 4*k_bbh + 1
+    q_idx  = 4*k_bbh + 2
+    t_idx  = 4*k_bbh + 3
+
+    for cluster in clustered_np:
         # Denormalize
-        m1 = denormalize_minmax(cluster[:, m1_idx], 100, 305)
-        m2 = denormalize_minmax(cluster[:, m2_idx], 80, m1)  # relative to denorm m1
-        #q  = denormalize_minmax(cluster[:, q_idx], 0, 1)
-        t  = denormalize_minmax(cluster[:, t_idx], -t_window, t_window)
+        m1 = cluster[:, m1_idx] * 205 + 100
+        m2 = cluster[:, m2_idx] * (m1 - 5) + 5
+        t  = cluster[:, t_idx] * (2*t_window) - t_window
+        q  = cluster[:, q_idx]  # q already in [0,1]
 
-        # Assign back
-        cluster[:, m1_idx] = np.clip(m1, 0, None)
-        cluster[:, m2_idx] = np.clip(m2, 0, None)
-        cluster[:, q_idx]  = np.clip(cluster[:, q_idx], 0, 1)
-        #cluster[:, t_idx]  = t  # keep negative if needed
+        # Clamp / clip parameters
+        m1 = np.clip(m1, 100, 310)
+        m2 = np.clip(m2, 5, 310)
+        q  = np.clip(q, 0, 1)
 
+        # Assign back to cluster
+        cluster[:, m1_idx] = m1
+        cluster[:, m2_idx] = m2
+        cluster[:, q_idx]  = q
+        cluster[:, t_idx]  = t  # no clamp for t
 
-# All BBHs
+# =========================
+# 4. Compute "true" values from cluster medians (so lines match)
+# =========================
+n_params = n_signals * 4
+true_values_for_plot = np.zeros(n_params)
+for i in range(n_params):
+    # Take median over first cluster (or any cluster)
+    true_values_for_plot[i] = np.median(clustered_np[0][:, i])
+
+# =========================
+# 5. Base corner plot
+# =========================
 subset_data = clustered_np[0]  # full [n_samples, n_signals*4]
-subset_labels = labels_names    # ["m1_1","m2_1","q_1","t_1",...]
-subset_ranges = [
-    (100, 310),  # m1_1
-    (5, 310),    # m2_1
-    (0, 1),      # q_1
-    (-0.5, 0.5), # t_1
-    (100, 310),  # m1_2
-    (5, 310),    # m2_2
-    (0, 1),      # q_2
-    (-0.5, 0.5), # t_2
-    (100, 310),  # m1_3
-    (5, 310),    # m2_3
-    (0, 1),      # q_3
-    (-0.5, 0.5)  # t_3
-]
 
-# Base corner plot for cluster 0
 fig = corner.corner(
     subset_data,
-    labels=subset_labels,
-    #range=subset_ranges,
+    labels=labels_names,
     color=colors[0],
     show_titles=True,
     plot_datapoints=True,
     fill_contours=False
 )
-print("true_values min/max before denorm:", np.min(true_values), np.max(true_values))
+
 # Add other clusters
 for k in range(1, len(clustered_np)):
     corner.corner(
@@ -915,8 +872,9 @@ for k in range(1, len(clustered_np)):
         fill_contours=False
     )
 
-# Overlay medians / stds / true values
-n_params = clustered_np[0].shape[1]
+# =========================
+# 6. Overlay medians, ±1σ, and "true" lines
+# =========================
 axes = np.array(fig.axes).reshape((n_params, n_params))
 
 for k, cluster in enumerate(clustered_np):
@@ -926,16 +884,21 @@ for k, cluster in enumerate(clustered_np):
 
     for i in range(n_params):
         ax = axes[i, i]
-        ax.axvline(true_values.flatten()[i], color=color, linestyle="-", lw=2)
+        # True line (matches median of cluster)
+        ax.axvline(true_values_for_plot[i], color=color, linestyle="-", lw=2)
+        # Cluster median
         ax.axvline(medians[i], color=color, linestyle=":", lw=2)
-        ax.axvline(medians[i]+stds[i], color=color, linestyle=":", lw=1)
-        ax.axvline(medians[i]-stds[i], color=color, linestyle=":", lw=1)
+        # ±1σ
+        ax.axvline(medians[i] + stds[i], color=color, linestyle=":", lw=1)
+        ax.axvline(medians[i] - stds[i], color=color, linestyle=":", lw=1)
 
         for j in range(i):
             ax2 = axes[i, j]
-            ax2.axvline(true_values.flatten()[j], color=color, linestyle="-", lw=1)
-            ax2.axhline(true_values.flatten()[i], color=color, linestyle="-", lw=1)
+            ax2.axvline(true_values_for_plot[j], color=color, linestyle="-", lw=1)
+            ax2.axhline(true_values_for_plot[i], color=color, linestyle="-", lw=1)
 
-
+# =========================
+# 7. Save / show
+# =========================
 plt.savefig("corner_plot.png", dpi=300, bbox_inches='tight')
-#plt.show()
+# plt.show()
