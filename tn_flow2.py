@@ -1052,3 +1052,88 @@ for k, cluster in enumerate(clustered_np):
 # =========================
 plt.savefig("corner_plot.png", dpi=300, bbox_inches='tight')
 plt.show()
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import kstest
+
+# ==========================
+# Compute PP values per parameter
+# ==========================
+def compute_pp_values_per_param(clustered_reordered, reference_samples, param_names=None):
+    """
+    Returns:
+        pp_dict[param_name] = array of percentiles (PP values) for that parameter.
+    """
+    n_params = clustered_reordered[0].shape[1]
+    
+    if param_names is None or len(param_names) < n_params:
+        param_names = param_names or []
+        param_names = param_names + [f"Param_{i+1}" for i in range(len(param_names), n_params)]
+    
+    pp_dict = {name: [] for name in param_names}
+
+    for k, cluster in enumerate(clustered_reordered):
+        true_vals = reference_samples[k]   # shape [n_signals, n_params_per_BBH]
+
+        for i in range(true_vals.shape[0]):  # iterate over true signals
+            for p in range(n_params):
+                posterior_samples = cluster[:, p]
+                true_val = true_vals[i, p]
+                percentile = np.mean(posterior_samples <= true_val)
+                pp_dict[param_names[p]].append(percentile)
+
+    # convert lists → np.array
+    for key in pp_dict:
+        pp_dict[key] = np.array(pp_dict[key])
+
+    return pp_dict
+
+# ==========================
+# PP plot with KS statistics
+# ==========================
+def pp_plot_with_ks(pp_dict, save_path="pp_plot_with_values.png"):
+    plt.figure(figsize=(7,7))
+    max_len = max(len(pp_dict[key]) for key in pp_dict)
+    nominal = np.linspace(0, 1, max_len)
+    
+    for key in pp_dict:
+        sorted_vals = np.sort(pp_dict[key])
+        median_val = np.median(pp_dict[key])
+        
+        # KS test for this parameter
+        D, p_value = kstest(pp_dict[key], 'uniform')
+        
+        plt.plot(nominal[:len(sorted_vals)], sorted_vals,
+                 label=f"{key} (median PP={median_val:.2f}, KS D={D:.2f}, p={p_value:.2f})",
+                 linewidth=2)
+    
+    # ==========================
+    # Compute global PP values (flatten all parameters)
+    # ==========================
+    all_pp_values = np.concatenate([v for v in pp_dict.values()])  # flatten all parameters
+
+    # KS test against uniform
+    D, p_value = kstest(all_pp_values, 'uniform')
+    plt.text(0.05, 0.9, f"KS D = {D:.3f}\np-value = {p_value:.3f}",
+         transform=plt.gca().transAxes, fontsize=12,
+         bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray'))
+    
+    plt.plot([0,1], [0,1], "k--", label="Ideal")
+    plt.xlabel("Nominal Credible Level")
+    plt.ylabel("Empirical Credible Level")
+    plt.title("PP Plot (All Parameters)")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+    print(f"Saved: {save_path}")
+
+# ==========================
+# RUN IT
+# ==========================
+param_names = ["m1", "m2", "q", "t"]  # adjust per BBH
+pp_dict = compute_pp_values_per_param(clustered_reordered, reference_samples_per_signal, param_names)
+pp_plot_with_ks(pp_dict, save_path="pp_plot_with_values.png")
+
