@@ -1052,7 +1052,46 @@ for k, cluster in enumerate(clustered_np):
 # =========================
 plt.savefig("corner_plot.png", dpi=300, bbox_inches='tight')
 plt.show()
+###################### on diagonals
 
+import numpy as np
+import matplotlib.pyplot as plt
+
+n_params = n_signals * 4
+fig, axes = plt.subplots(1, n_params, figsize=(3*n_params, 4))
+
+for i in range(n_params):
+    ax = axes[i]
+    for k, cluster in enumerate(clustered_np):
+        data = cluster[:, i]
+        ax.hist(data, bins=30, color=colors[k], alpha=0.4, density=True)
+
+        median = np.median(data)
+        std = np.std(data)
+        true_val = true_values_for_plot[i]
+
+        # Median line
+        ax.axvline(median, color=colors[k], linestyle=":", lw=2)
+        # ±1σ
+        ax.axvline(median + std, color=colors[k], linestyle=":", lw=1)
+        ax.axvline(median - std, color=colors[k], linestyle=":", lw=1)
+        # True value line
+        ax.axvline(true_val, color=colors[k], linestyle="-", lw=2)
+
+    # Set x-label with median ±1σ for first cluster (or choose which one)
+    median0 = np.median(clustered_np[0][:, i])
+    std0 = np.std(clustered_np[0][:, i])
+    ax.set_xlabel(f"{labels_names[i]}\n{median0:.2f} ± {std0:.2f}")
+
+    if i > 0:
+        ax.set_yticks([])
+
+
+plt.tight_layout()
+plt.savefig("corner_plot_on_diags.png", dpi=300, bbox_inches='tight')
+plt.show()
+
+######################
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import kstest
