@@ -593,7 +593,7 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 signal_length = 1024
 batch_size    = 10
-n_epochs      = 100
+n_epochs      = 150
 n_signals     = 3
 n_params      = n_signals * 4
 n_draws=100
@@ -756,7 +756,7 @@ plt.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
 
 #plt.show()
 
-n_draws=100
+n_draws=3000
 
 # =========================
 # 6 Posterior & Clustering
