@@ -350,7 +350,7 @@ class MultiBBHToyDataset(Dataset):
 
             # Find the peak of the superposed signal
             peak_idx = torch.argmax(torch.abs(noisy_signal))
-            
+
             # Compute crop indices
             start_idx = peak_idx - signal_length // 2
             end_idx = peak_idx + signal_length // 2
@@ -593,7 +593,7 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 signal_length = 1024
 batch_size    = 10
-n_epochs      = 150
+n_epochs      = 100
 n_signals     = 3
 n_params      = n_signals * 4
 n_draws=100
@@ -634,7 +634,7 @@ print("train_size :", train_size)
 train_ds, val_ds = torch.utils.data.random_split(ds, [train_size, val_size])
 train_loader = DataLoader(train_ds, batch_size=train_size, shuffle=True)
 val_loader   = DataLoader(val_ds,   batch_size=val_size, shuffle=False)
-       
+
 # =========================
 # TRAINING LOOP
 # =========================
@@ -756,7 +756,7 @@ plt.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
 
 #plt.show()
 
-n_draws=3000
+n_draws=100
 
 # =========================
 # 6 Posterior & Clustering
@@ -799,6 +799,7 @@ clustered_np = [
     c if isinstance(c, np.ndarray) else c.detach().numpy()
     for c in clustered_reordered
 ]
+
 true_values_for_plot = np.zeros_like(clustered_np[0].mean(axis=0))  # shape [n_signals*4]
 
 for k_bbh in range(n_signals):
@@ -839,6 +840,155 @@ for k_bbh in range(n_signals):
         cluster[:, m2_idx] = m2
         cluster[:, q_idx]  = q
         cluster[:, t_idx]  = t  # no clamp for t
+
+"""
+import numpy as np
+import matplotlib.pyplot as plt
+import corner
+
+
+# =============================
+#   0) PARAMETERS
+# =============================
+n_BBHs = n_signals          # 3
+n_params = n_BBHs * 4       # 12 parameters total
+
+theta_true = theta_batch[0]  # true θ for the FIRST noisy signal
+
+
+# =============================
+#   1) BASE CORNER PLOT (cluster 0)
+# =============================
+fig = corner.corner(
+    clustered_np[0],
+    labels=labels_names,
+    color=colors[0],
+    #show_titles=True,
+    plot_datapoints=True,
+    plot_contours=True,
+    fill_contours=False,
+)
+
+# Overlay other clusters
+for k in range(1, len(clustered_np)):
+    corner.corner(
+        clustered_np[k],
+        fig=fig,
+        color=colors[k],
+        plot_datapoints=True,
+        plot_contours=True,
+        fill_contours=False,
+        labels=None,
+        show_titles=False,
+    )
+
+# Access corner axes
+axes = np.array(fig.axes).reshape((n_params, n_params))
+
+
+# =================================================
+#   2) ADD TRUE AND PREDICTED LINES (ALL SUBPLOTS)
+# =================================================
+for bb in range(n_BBHs):
+
+    # indices for this BBH's 4 parameters
+    p0 = bb * 4
+    p1 = (bb + 1) * 4
+
+    true_vals_bb = theta_true[p0:p1]
+    median_pred_bb = np.median(clustered_np[bb][:, p0:p1], axis=0)
+    std_pred_bb = np.std(clustered_np[bb][:, p0:p1], axis=0)
+
+    # Loop over all subplot positions in the corner grid
+    for i in range(n_params):
+        for j in range(i + 1):
+
+            ax = axes[i, j]
+
+            pi = i % 4
+            pj = j % 4
+
+            # ---------- TRUE LINES ----------
+            ax.axvline(
+                true_vals_bb[pj],
+                color="black", linestyle="--", lw=1, alpha=0.7
+            )
+            ax.axhline(
+                true_vals_bb[pi],
+                color="black", linestyle="--", lw=1, alpha=0.7
+            )
+
+            # ---------- PREDICTED LINES ----------
+            ax.axvline(
+                median_pred_bb[pj],
+                color=colors[bb], linestyle=":", lw=1.3, alpha=0.9
+            )
+            ax.axhline(
+                median_pred_bb[pi],
+                color=colors[bb], linestyle=":", lw=1.3, alpha=0.9
+            )
+
+
+# =================================================
+#   3) ADD TEXT ABOVE EACH DIAGONAL PANEL
+# =================================================
+for param_idx in range(n_params):
+
+    ax = axes[param_idx, param_idx]  # diagonal histogram
+
+    # Collect true and predicted for this parameter across BBHs
+    true_vals_param = []
+    median_vals_param = []
+    std_vals_param = []
+
+    for bb in range(n_BBHs):
+        p = bb * 4 + (param_idx % 4)
+
+        true_vals_param.append(theta_true[p])
+        median_vals_param.append(np.median(clustered_np[bb][:, p]))
+        std_vals_param.append(np.std(clustered_np[bb][:, p]))
+
+    # ---- TEXT POSITION ----
+    x = 0.5
+    y_top = 1.34      # above plot
+    line_step = 0.07  # spacing between text lines
+
+    # ---- PREDICTED VALUES (one line per BBH) ----
+    for bb in range(n_BBHs):
+        # True value
+        ax.text(
+            0.5, y_top - (2*bb) * line_step,
+            f"True {bb+1}: {true_vals_param[bb]:.3f}",
+            transform=ax.transAxes,
+            ha="center", va="bottom",
+            fontsize=8,
+            color=colors[bb],
+            fontweight="bold"
+        )
+        # Predicted median ±1σ
+        ax.text(
+            0.5, y_top - (2*bb + 1) * line_step,
+            f"Pred {bb+1}: {median_vals_param[bb]:.3f} ± {std_vals_param[bb]:.3f}",
+            transform=ax.transAxes,
+            ha="center", va="bottom",
+            fontsize=8,
+            color=colors[bb]
+        )
+
+
+
+plt.tight_layout()
+plt.savefig("corner_all_clusters_with_true_pred_text.png", dpi=300)
+plt.show()
+"""
+
+
+
+#  
+# ===========================================================================
+# 3. Medians
+# ===========================================================================
+true_values_for_plot = np.median(np.vstack(clustered_np), axis=0)
 
 # =========================
 # 4. Compute "true" values from cluster medians (so lines match)
