@@ -350,7 +350,7 @@ class MultiBBHToyDataset(Dataset):
 
             # Find the peak of the superposed signal
             peak_idx = torch.argmax(torch.abs(noisy_signal))
-
+            
             # Compute crop indices
             start_idx = peak_idx - signal_length // 2
             end_idx = peak_idx + signal_length // 2
@@ -593,10 +593,10 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 signal_length = 1024
 batch_size    = 10
-n_epochs      = 10
+n_epochs      = 150
 n_signals     = 3
 n_params      = n_signals * 4
-n_draws=50
+n_draws=100
 
 ds = MultiBBHToyDataset(batch_size=batch_size,
                         signal_length=signal_length,
@@ -634,7 +634,7 @@ print("train_size :", train_size)
 train_ds, val_ds = torch.utils.data.random_split(ds, [train_size, val_size])
 train_loader = DataLoader(train_ds, batch_size=train_size, shuffle=True)
 val_loader   = DataLoader(val_ds,   batch_size=val_size, shuffle=False)
-
+       
 # =========================
 # TRAINING LOOP
 # =========================
@@ -756,7 +756,7 @@ plt.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
 
 #plt.show()
 
-n_draws=500
+n_draws=3000
 
 # =========================
 # 6 Posterior & Clustering
@@ -901,4 +901,4 @@ for k, cluster in enumerate(clustered_np):
 # 7. Save / show
 # =========================
 plt.savefig("corner_plot.png", dpi=300, bbox_inches='tight')
-# plt.show()
+plt.show()
