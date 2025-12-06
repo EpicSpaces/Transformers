@@ -593,10 +593,10 @@ def reorder_clusters_to_reference(clustered_samples, reference_samples_per_signa
 # =========================
 signal_length = 1024
 batch_size    = 10
-n_epochs      = 150
+n_epochs      = 100
 n_signals     = 3
 n_params      = n_signals * 4
-n_draws=100
+n_draws=1000
 
 ds = MultiBBHToyDataset(batch_size=batch_size,
                         signal_length=signal_length,
@@ -756,13 +756,13 @@ plt.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
 
 #plt.show()
 
-n_draws=3000
+n_draws=1000
 
 # =========================
 # 6 Posterior & Clustering
 # =========================
 x_obs = torch.stack([ds[i][0] for i in range(len(ds))]).unsqueeze(1).to(device)
-theta_all = torch.tensor(ds.theta).reshape(len(ds),-1)
+theta_all = torch.stack([ds[i][1] for i in range(len(ds))]).reshape(len(ds), -1) #[batch_size, K*4]
 theta_batch = theta_all[:batch_size].numpy()   # [B, params]
 
 with torch.no_grad():
@@ -800,19 +800,6 @@ clustered_np = [
     for c in clustered_reordered
 ]
 
-true_values_for_plot = np.zeros_like(clustered_np[0].mean(axis=0))  # shape [n_signals*4]
-
-for k_bbh in range(n_signals):
-    m1_idx = 4*k_bbh
-    m2_idx = 4*k_bbh+1
-    q_idx  = 4*k_bbh+2
-    t_idx  = 4*k_bbh+3
-
-    # Compute median per column from cluster (or reference samples)
-    true_values_for_plot[m1_idx] = np.median(clustered_np[0][:, m1_idx])
-    true_values_for_plot[m2_idx] = np.median(clustered_np[0][:, m2_idx])
-    true_values_for_plot[q_idx]  = np.median(clustered_np[0][:, q_idx])
-    true_values_for_plot[t_idx]  = np.median(clustered_np[0][:, t_idx])
 
 # =========================
 # 3. Denormalize cluster samples
@@ -841,215 +828,135 @@ for k_bbh in range(n_signals):
         cluster[:, q_idx]  = q
         cluster[:, t_idx]  = t  # no clamp for t
 
-"""
-import numpy as np
-import matplotlib.pyplot as plt
-import corner
 
+# =========================
+# 4. Corner PLot
+# =========================
+# -----------------------------
+# Assume:
+# clustered_np : list of np.ndarray, each [n_samples, n_params]
+# theta_batch  : [n_signals, n_params] or [n_samples, n_params]
+# labels_names : list of strings for each parameter
+# colors       : list of colors per cluster
+# -----------------------------
 
-# =============================
-#   0) PARAMETERS
-# =============================
-n_BBHs = n_signals          # 3
-n_params = n_BBHs * 4       # 12 parameters total
+# Compute overall predicted median and std across all clusters
+all_samples = np.vstack(clustered_np)          # stack all clusters together
+cluster_medians = np.median(all_samples, axis=0)
+cluster_stds = np.std(all_samples, axis=0)
 
-theta_true = theta_batch[0]  # true θ for the FIRST noisy signal
+# =========================
+# 1. Compute true (median) parameters from theta_batch
+# =========================
+true_values_for_plot = np.median(theta_batch, axis=0)  # shape: [n_params]
 
+# =========================
+# 2. Denormalize true parameter values per signal
+# =========================
+true_values_denorm = true_values_for_plot.copy()
 
-# =============================
-#   1) BASE CORNER PLOT (cluster 0)
-# =============================
+for k_bbh in range(n_signals):
+    m1_idx = 4*k_bbh
+    m2_idx = 4*k_bbh + 1
+    q_idx  = 4*k_bbh + 2
+    t_idx  = 4*k_bbh + 3
+
+    # Denormalize
+    m1 = true_values_for_plot[m1_idx] * 205 + 100
+    m2 = true_values_for_plot[m2_idx] * (m1 - 5) + 5
+    t  = true_values_for_plot[t_idx] * (2*t_window) - t_window
+    q  = true_values_for_plot[q_idx]  # q already in [0,1]
+
+    # Clamp / clip parameters
+    m1 = np.clip(m1, 100, 310)
+    m2 = np.clip(m2, 5, 310)
+    q  = np.clip(q, 0, 1)
+
+    # Assign back to denormalized array
+    true_values_denorm[m1_idx] = m1
+    true_values_denorm[m2_idx] = m2
+    true_values_denorm[q_idx]  = q
+    true_values_denorm[t_idx]  = t
+
+# Number of parameters
+n_params = theta_batch.shape[1]
+
+# -----------------------------
+# 1. Base corner plot with first cluster
+# -----------------------------
 fig = corner.corner(
     clustered_np[0],
     labels=labels_names,
     color=colors[0],
-    #show_titles=True,
+    show_titles=False,
     plot_datapoints=True,
-    plot_contours=True,
-    fill_contours=False,
+    fill_contours=False
 )
 
-# Overlay other clusters
+# -----------------------------
+# 2. Add other clusters
+# -----------------------------
 for k in range(1, len(clustered_np)):
     corner.corner(
         clustered_np[k],
         fig=fig,
         color=colors[k],
         plot_datapoints=True,
-        plot_contours=True,
         fill_contours=False,
-        labels=None,
-        show_titles=False,
+        labels=None,  # don't overwrite labels
+        show_titles=False
     )
 
-# Access corner axes
+# -----------------------------
+# 3. Overlay true values and overall predicted median ±1σ
+# -----------------------------
 axes = np.array(fig.axes).reshape((n_params, n_params))
 
+for i in range(n_params):
+    median = cluster_medians[i]
+    std = cluster_stds[i]
 
-# =================================================
-#   2) ADD TRUE AND PREDICTED LINES (ALL SUBPLOTS)
-# =================================================
-for bb in range(n_BBHs):
+    # Diagonal
+    ax = axes[i, i]
+    ax.axvline(true_values_denorm[i], color="black", linestyle="-", lw=2)  # True value
+    ax.axvline(median, color="red", linestyle=":", lw=2)                      # Median
+    ax.axvline(median + std, color="red", linestyle=":", lw=1)                # +1σ
+    ax.axvline(median - std, color="red", linestyle=":", lw=1)                # -1σ
 
-    # indices for this BBH's 4 parameters
-    p0 = bb * 4
-    p1 = (bb + 1) * 4
+    # Off-diagonal
+    for j in range(i):
+        ax2 = axes[i, j]
+        ax2.axvline(true_values_denorm[j], color="black", linestyle="-", lw=1)
+        ax2.axhline(true_values_denorm[i], color="black", linestyle="-", lw=1)
 
-    true_vals_bb = theta_true[p0:p1]
-    median_pred_bb = np.median(clustered_np[bb][:, p0:p1], axis=0)
-    std_pred_bb = np.std(clustered_np[bb][:, p0:p1], axis=0)
+# -----------------------------
+# 4. Add custom titles (true vs predicted ±1σ)
+# -----------------------------
 
-    # Loop over all subplot positions in the corner grid
-    for i in range(n_params):
-        for j in range(i + 1):
-
-            ax = axes[i, j]
-
-            pi = i % 4
-            pj = j % 4
-
-            # ---------- TRUE LINES ----------
-            ax.axvline(
-                true_vals_bb[pj],
-                color="black", linestyle="--", lw=1, alpha=0.7
-            )
-            ax.axhline(
-                true_vals_bb[pi],
-                color="black", linestyle="--", lw=1, alpha=0.7
-            )
-
-            # ---------- PREDICTED LINES ----------
-            ax.axvline(
-                median_pred_bb[pj],
-                color=colors[bb], linestyle=":", lw=1.3, alpha=0.9
-            )
-            ax.axhline(
-                median_pred_bb[pi],
-                color=colors[bb], linestyle=":", lw=1.3, alpha=0.9
-            )
-
-
-# =================================================
-#   3) ADD TEXT ABOVE EACH DIAGONAL PANEL
-# =================================================
-for param_idx in range(n_params):
-
-    ax = axes[param_idx, param_idx]  # diagonal histogram
-
-    # Collect true and predicted for this parameter across BBHs
-    true_vals_param = []
-    median_vals_param = []
-    std_vals_param = []
-
-    for bb in range(n_BBHs):
-        p = bb * 4 + (param_idx % 4)
-
-        true_vals_param.append(theta_true[p])
-        median_vals_param.append(np.median(clustered_np[bb][:, p]))
-        std_vals_param.append(np.std(clustered_np[bb][:, p]))
-
-    # ---- TEXT POSITION ----
-    x = 0.5
-    y_top = 1.34      # above plot
-    line_step = 0.07  # spacing between text lines
-
-    # ---- PREDICTED VALUES (one line per BBH) ----
-    for bb in range(n_BBHs):
-        # True value
-        ax.text(
-            0.5, y_top - (2*bb) * line_step,
-            f"True {bb+1}: {true_vals_param[bb]:.3f}",
-            transform=ax.transAxes,
-            ha="center", va="bottom",
-            fontsize=8,
-            color=colors[bb],
-            fontweight="bold"
-        )
-        # Predicted median ±1σ
-        ax.text(
-            0.5, y_top - (2*bb + 1) * line_step,
-            f"Pred {bb+1}: {median_vals_param[bb]:.3f} ± {std_vals_param[bb]:.3f}",
-            transform=ax.transAxes,
-            ha="center", va="bottom",
-            fontsize=8,
-            color=colors[bb]
-        )
-
-
-
-plt.tight_layout()
-plt.savefig("corner_all_clusters_with_true_pred_text.png", dpi=300)
-plt.show()
+"""
+# -----------------------------
+# 4. Add custom titles (true ± predicted ±1σ)
+# -----------------------------
+for i in range(n_params):
+    ax = axes[i, i]
+    # Build custom title string
+    title_str = f"True: {true_values_denorm[i]:.3f}\n"
+    for k, cluster in enumerate(clustered_np):
+        m = cluster_medians[k][i]
+        s = cluster_stds[k][i]
+        title_str += f"Pred{k+1}: {m:.3f} ± {s:.3f}\n"
+    ax.set_title(title_str, fontsize=9)
 """
 
-
-
-#  
-# ===========================================================================
-# 3. Medians
-# ===========================================================================
-true_values_for_plot = np.median(np.vstack(clustered_np), axis=0)
-
-# =========================
-# 4. Compute "true" values from cluster medians (so lines match)
-# =========================
-n_params = n_signals * 4
-true_values_for_plot = np.zeros(n_params)
 for i in range(n_params):
-    # Take median over first cluster (or any cluster)
-    true_values_for_plot[i] = np.median(clustered_np[0][:, i])
+    ax = axes[i, i]
+    title_str = f"True: {true_values_denorm[i]:.3f}\nPred: {cluster_medians[i]:.3f} ± {cluster_stds[i]:.3f}"
+    ax.set_title(title_str, fontsize=9)
 
-# =========================
-# 5. Base corner plot
-# =========================
-subset_data = clustered_np[0]  # full [n_samples, n_signals*4]
-
-fig = corner.corner(
-    subset_data,
-    labels=labels_names,
-    color=colors[0],
-    show_titles=True,
-    plot_datapoints=True,
-    fill_contours=False
-)
-
-# Add other clusters
-for k in range(1, len(clustered_np)):
-    corner.corner(
-        clustered_np[k], fig=fig,
-        color=colors[k],
-        plot_datapoints=True,
-        fill_contours=False
-    )
-
-# =========================
-# 6. Overlay medians, ±1σ, and "true" lines
-# =========================
-axes = np.array(fig.axes).reshape((n_params, n_params))
-
-for k, cluster in enumerate(clustered_np):
-    medians = np.median(cluster, axis=0)
-    stds = np.std(cluster, axis=0)
-    color = colors[k]
-
-    for i in range(n_params):
-        ax = axes[i, i]
-        # True line (matches median of cluster)
-        ax.axvline(true_values_for_plot[i], color=color, linestyle="-", lw=2)
-        # Cluster median
-        ax.axvline(medians[i], color=color, linestyle=":", lw=2)
-        # ±1σ
-        ax.axvline(medians[i] + stds[i], color=color, linestyle=":", lw=1)
-        ax.axvline(medians[i] - stds[i], color=color, linestyle=":", lw=1)
-
-        for j in range(i):
-            ax2 = axes[i, j]
-            ax2.axvline(true_values_for_plot[j], color=color, linestyle="-", lw=1)
-            ax2.axhline(true_values_for_plot[i], color=color, linestyle="-", lw=1)
-
-# =========================
-# 7. Save / show
-# =========================
+# -----------------------------
+# 5. Show/save plot
+# -----------------------------
+plt.tight_layout()
 plt.savefig("corner_plot.png", dpi=300, bbox_inches='tight')
 plt.show()
 ###################### on diagonals
@@ -1062,30 +969,30 @@ fig, axes = plt.subplots(1, n_params, figsize=(3*n_params, 4))
 
 for i in range(n_params):
     ax = axes[i]
+    median = cluster_medians[i]
+    std = cluster_stds[i]
+    true_val = true_values_denorm[i]
+    
     for k, cluster in enumerate(clustered_np):
         data = cluster[:, i]
         ax.hist(data, bins=30, color=colors[k], alpha=0.4, density=True)
-
-        median = np.median(data)
-        std = np.std(data)
-        true_val = true_values_for_plot[i]
-
+        
         # Median line
         ax.axvline(median, color=colors[k], linestyle=":", lw=2)
         # ±1σ
         ax.axvline(median + std, color=colors[k], linestyle=":", lw=1)
         ax.axvline(median - std, color=colors[k], linestyle=":", lw=1)
-        # True value line
-        ax.axvline(true_val, color=colors[k], linestyle="-", lw=2)
+    
+    # True value line (stand out in black)
+    ax.axvline(true_val, color="black", linestyle="-", lw=2)
 
-    # Set x-label with median ±1σ for first cluster (or choose which one)
+    # Set x-label with median ±1σ for first cluster
     median0 = np.median(clustered_np[0][:, i])
     std0 = np.std(clustered_np[0][:, i])
-    ax.set_xlabel(f"{labels_names[i]}\n{median0:.2f} ± {std0:.2f}")
+    ax.set_xlabel(f"{labels_names[i]}\n{median0:.2f} ± {std0:.2f}", fontsize=9)
 
     if i > 0:
         ax.set_yticks([])
-
 
 plt.tight_layout()
 plt.savefig("corner_plot_on_diags.png", dpi=300, bbox_inches='tight')
@@ -1138,13 +1045,12 @@ def pp_plot_with_ks(pp_dict, save_path="pp_plot_with_values.png"):
     
     for key in pp_dict:
         sorted_vals = np.sort(pp_dict[key])
-        median_val = np.median(pp_dict[key])
         
         # KS test for this parameter
         D, p_value = kstest(pp_dict[key], 'uniform')
         
         plt.plot(nominal[:len(sorted_vals)], sorted_vals,
-                 label=f"{key} (median PP={median_val:.2f}, KS D={D:.2f}, p={p_value:.2f})",
+                 label=f"{key} (KS D={D:.2f}, p={p_value:.2f})",
                  linewidth=2)
     
     # ==========================
@@ -1175,4 +1081,3 @@ def pp_plot_with_ks(pp_dict, save_path="pp_plot_with_values.png"):
 param_names = ["m1", "m2", "q", "t"]  # adjust per BBH
 pp_dict = compute_pp_values_per_param(clustered_reordered, reference_samples_per_signal, param_names)
 pp_plot_with_ks(pp_dict, save_path="pp_plot_with_values.png")
-
