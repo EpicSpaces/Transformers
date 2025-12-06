@@ -919,9 +919,9 @@ for i in range(n_params):
     # Diagonal
     ax = axes[i, i]
     ax.axvline(true_values_denorm[i], color="black", linestyle="-", lw=2)  # True value
-    ax.axvline(median, color="red", linestyle=":", lw=2)                      # Median
-    ax.axvline(median + std, color="red", linestyle=":", lw=1)                # +1σ
-    ax.axvline(median - std, color="red", linestyle=":", lw=1)                # -1σ
+    ax.axvline(median, color="orange", linestyle=":", lw=2)                      # Median
+    ax.axvline(median + std, color="orange", linestyle=":", lw=1)                # +1σ
+    ax.axvline(median - std, color="orange", linestyle=":", lw=1)                # -1σ
 
     # Off-diagonal
     for j in range(i):
@@ -978,10 +978,10 @@ for i in range(n_params):
         ax.hist(data, bins=30, color=colors[k], alpha=0.4, density=True)
         
         # Median line
-        ax.axvline(median, color=colors[k], linestyle=":", lw=2)
+        ax.axvline(median, color="orange", linestyle=":", lw=2)
         # ±1σ
-        ax.axvline(median + std, color=colors[k], linestyle=":", lw=1)
-        ax.axvline(median - std, color=colors[k], linestyle=":", lw=1)
+        ax.axvline(median + std, color="orange", linestyle=":", lw=1)
+        ax.axvline(median - std, color="orange", linestyle=":", lw=1)
     
     # True value line (stand out in black)
     ax.axvline(true_val, color="black", linestyle="-", lw=2)
