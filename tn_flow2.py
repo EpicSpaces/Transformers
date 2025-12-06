@@ -977,11 +977,11 @@ for i in range(n_params):
         data = cluster[:, i]
         ax.hist(data, bins=30, color=colors[k], alpha=0.4, density=True)
         
-        # Median line
-        ax.axvline(median, color="orange", linestyle=":", lw=2)
-        # ±1σ
-        ax.axvline(median + std, color="orange", linestyle=":", lw=1)
-        ax.axvline(median - std, color="orange", linestyle=":", lw=1)
+    # Median line
+    ax.axvline(median, color="orange", linestyle=":", lw=2)
+    # ±1σ
+    ax.axvline(median + std, color="orange", linestyle=":", lw=1)
+    ax.axvline(median - std, color="orange", linestyle=":", lw=1)
     
     # True value line (stand out in black)
     ax.axvline(true_val, color="black", linestyle="-", lw=2)
