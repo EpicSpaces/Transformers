@@ -985,11 +985,7 @@ for i in range(n_params):
     
     # True value line (stand out in black)
     ax.axvline(true_val, color="black", linestyle="-", lw=2)
-
-    # Set x-label with median ±1σ for first cluster
-    median0 = np.median(clustered_np[0][:, i])
-    std0 = np.std(clustered_np[0][:, i])
-    ax.set_xlabel(f"{labels_names[i]}\n{median0:.2f} ± {std0:.2f}", fontsize=9)
+    ax.set_xlabel(f"True: {true_values_denorm[i]:.3f}\nPred: {cluster_medians[i]:.3f} ± {cluster_stds[i]:.3f}", fontsize=9)
 
     if i > 0:
         ax.set_yticks([])
